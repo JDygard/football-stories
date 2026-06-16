@@ -1,0 +1,33 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+football-stories/node_modules
+football-stories/public/data
+football-stories/public/data
+football-stories/*.md
+football-stories-bak
+
+dist
+dist-ssr
+*.local
+
+__pycache__
+dataset_generation
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.md
