@@ -62,11 +62,16 @@ export function positionGroup(position) {
 
 export const STRIP_H = 16; // band thickness (horizontal AND vertical)
 export const STRIP_GAP = 0; // stacked bands sit flush; borders delineate
-// With many concurrent ribbons the gutter would explode; past this many tail
-// columns, tails collapse to thin bars (1px black border + 2px color via the
-// path stroke). Future: relative sizing — see ROADMAP.
-export const THIN_TAIL_THRESHOLD = 5;
-export const THIN_TAIL_W = 4;
+// Tail columns stay full STRIP_H wide until the gutter they'd need
+// (slotCount * STRIP_H) overflows the width budget; past that they shrink
+// *continuously* toward MIN_TAIL_W (≈2px of visible color inside the 1px
+// borders) — no hard breakpoint, so we only reach the thin floor when the
+// count genuinely demands it.
+export const MIN_TAIL_W = 4;
+// Resting inset of the tail gutter from the right screen edge: a 3px sliver
+// that exposes the "leaving" stub of exit bands (they still run to the true
+// edge) and seeds the drag-to-follow-a-career affordance.
+export const PEEK = 3;
 
 export function roleColor(role) {
   return ROLE_COLORS[role] || ROLE_COLORS.unknown;
@@ -105,9 +110,12 @@ export function buildStaffRibbons({
   layout,
   stripHeight = STRIP_H,
   gap = STRIP_GAP,
+  // Horizontal budget for the whole tail gutter. Tails stay full width until
+  // they'd collectively exceed this, then shrink. Infinity = never compress.
+  maxRailWidth = Infinity,
 } = {}) {
   if (!staff?.length || !layout?.blocks?.length) {
-    return { ribbons: [], railWidth: 0 };
+    return { ribbons: [], railWidth: 0, slotCount: 0, tailW: STRIP_H };
   }
 
   const first = layout.blocks[0];
@@ -130,6 +138,12 @@ export function buildStaffRibbons({
       kind: s.kind || "staff",
       approx: !!s.approx,
       position: s.position || null,
+      // Career-follow links (To/From <team>), computed in the pipeline.
+      prevTeam: s.prev_team || null,
+      nextTeam: s.next_team || null,
+      entry: s.entry || null,
+      exit: s.exit || null,
+      conf: s.conf || null,
     };
     spans.push(span);
     if (!byFrom.has(s.from)) byFrom.set(s.from, []);
@@ -144,7 +158,11 @@ export function buildStaffRibbons({
     const toB = layout.byYear.get(r.to);
 
     const idx = byFrom.get(r.from).indexOf(r);
-    let y0 = fromB ? fromB.offseason.y0 : layout.tToY(r.from);
+    // Anchor entry bands below the offseason's year-marker header (ribbonTop),
+    // so the year sits above the incoming-ribbons area.
+    let y0 = fromB
+      ? fromB.offseason.ribbonTop ?? fromB.offseason.y0
+      : layout.tToY(r.from);
     y0 += idx * (stripHeight + gap);
     let y1 = toB ? toB.season.y1 : layout.tToY(r.to + 1);
 
@@ -191,25 +209,40 @@ export function buildStaffRibbons({
     for (const r of group) r.tailEnd = r.exitY + stripHeight;
   }
 
-  // ---- global tail slots: adjacent STRIP_H-wide columns, slots reused ----
+  // ---- global tail slots: adjacent columns, slots reused ----
   const slotMap = allocateTailSlots(
     ribbons.map((r) => ({ id: r.key, startY: r.y0, endY: r.tailEnd })),
   );
   const slotCount = ribbons.length
     ? Math.max(...slotMap.values()) + 1
     : 0;
-  const tailW = slotCount > THIN_TAIL_THRESHOLD ? THIN_TAIL_W : stripHeight;
+
+  // Progressive width: full STRIP_H until the gutter overflows its budget,
+  // then shrink smoothly (floor MIN_TAIL_W). floor(budget/slotCount) makes the
+  // taper continuous in slotCount instead of snapping at a threshold.
+  const fullRail = slotCount * stripHeight;
+  let tailW = stripHeight;
+  if (slotCount > 0 && fullRail > maxRailWidth) {
+    tailW = Math.max(
+      MIN_TAIL_W,
+      Math.min(stripHeight, Math.floor(maxRailWidth / slotCount)),
+    );
+  }
   const railWidth = slotCount * tailW;
 
   // Slot 0 sits rightmost (longest-running ribbons hug the screen edge),
-  // matching the original svgRight - (slot+1)*stripHeight scheme.
+  // matching the original svgRight - (slot+1)*stripHeight scheme. Keep the
+  // slot index on each ribbon so the render layer can re-derive positions at a
+  // different tail width (e.g. expanded to full width while the gutter is
+  // dragged open).
   for (const r of ribbons) {
     const slot = slotMap.get(r.key) ?? 0;
+    r.slot = slot;
     r.x = railWidth - (slot + 1) * tailW;
     r.width = tailW;
   }
 
-  return { ribbons, railWidth };
+  return { ribbons, railWidth, slotCount, tailW };
 }
 
 // Scroll-dependent entry-band placement. Returns Map<ribbon.key,

@@ -37,6 +37,27 @@ export function tierColor(tier) {
   return TIER_COLORS[tier] || NO_VALUE_COLOR;
 }
 
+// WCAG-aware foreground for a tier chip. The ramp runs from dark green through
+// pale yellow (C = #fee08b) to orange/red, so white text fails badly on the
+// light middle tiers. Pick near-black or white by whichever has the higher
+// contrast ratio against the chip color — both ≥4.5:1 (AA) across the ramp.
+function _srgbToLin(c) {
+  c /= 255;
+  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function _luminance(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 0.2126 * _srgbToLin(r) + 0.7152 * _srgbToLin(g) + 0.0722 * _srgbToLin(b);
+}
+export function tierTextColor(tier) {
+  const L = _luminance(tierColor(tier));
+  const contrastWhite = 1.05 / (L + 0.05);
+  const contrastBlack = (L + 0.05) / 0.05;
+  return contrastBlack >= contrastWhite ? "#1a1a1a" : "#ffffff";
+}
+
 // Group a team draft segment's flat picks list into { [year]: picks[] }.
 export function groupPicksByYear(picks) {
   const out = {};

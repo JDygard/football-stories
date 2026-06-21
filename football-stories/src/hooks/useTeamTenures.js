@@ -33,7 +33,17 @@ export default function useTeamTenures(teamId, draftSegment) {
 
   return useMemo(() => {
     if (fetched?.tenures?.length) {
-      return { tenures: fetched.tenures, source: "pipeline" };
+      // Pipeline rows carry the id as player_id_internal; the rest of the UI
+      // (selection, dedup, React keys) keys on player_id, so normalize here.
+      const seen = new Set();
+      const tenures = [];
+      for (const t of fetched.tenures) {
+        const id = t.player_id ?? t.player_id_internal;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        tenures.push({ ...t, player_id: id });
+      }
+      return { tenures, source: "pipeline" };
     }
     const seen = new Set();
     const out = [];

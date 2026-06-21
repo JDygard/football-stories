@@ -5,8 +5,8 @@
 // Stats are position-relevant: a QB card shows passing, a corner shows
 // coverage numbers — no interception column for Peyton Manning.
 
-import { useEffect, useState } from "react";
-import { tierColor } from "./visualization/offseason/draftModel.js";
+import { useEffect, useRef, useState } from "react";
+import { tierColor, tierTextColor } from "./visualization/offseason/draftModel.js";
 import { ROLE_COLORS } from "./visualization/staffRibbonModel.js";
 import { roleLabelFromFlags } from "../utils/getPersonnelTitle.js";
 
@@ -124,6 +124,21 @@ const cardStyle = {
   zIndex: 30,
 };
 
+// Close when a pointer-down lands outside the card. The opening tap has
+// already completed by the time this effect attaches its listener, so it
+// won't immediately self-dismiss.
+function useDismiss(onClose) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [onClose]);
+  return ref;
+}
+
 function Row({ label, value }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
@@ -151,6 +166,7 @@ function CloseButton({ onClose }) {
 
 function PlayerCard({ pick, onClose }) {
   const [career, setCareer] = useState(pick.career || null);
+  const cardRef = useDismiss(onClose);
 
   useEffect(() => {
     if (!pick.player_id) return;
@@ -174,7 +190,7 @@ function PlayerCard({ pick, onClose }) {
   const hof = career?.hof ?? pick.career?.hof;
 
   return (
-    <div style={cardStyle}>
+    <div style={cardStyle} ref={cardRef}>
       <CloseButton onClose={onClose} />
       <div style={{ fontSize: 14, fontWeight: 700, paddingRight: 16 }}>
         {pick.name || "Unknown"}
@@ -192,7 +208,7 @@ function PlayerCard({ pick, onClose }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span
           style={{
-            background: tierColor(tier), color: tier ? "#fff" : "#888",
+            background: tierColor(tier), color: tier ? tierTextColor(tier) : "#5a5a5a",
             fontWeight: 700, borderRadius: 4, padding: "2px 8px", fontSize: 13,
           }}
         >
@@ -234,6 +250,7 @@ function PlayerCard({ pick, onClose }) {
 
 function StaffCard({ ribbon, adminById, onClose }) {
   const [records, setRecords] = useState(null);
+  const cardRef = useDismiss(onClose);
 
   useEffect(() => {
     if (!ribbon.id) return;
@@ -253,7 +270,7 @@ function StaffCard({ ribbon, adminById, onClose }) {
   const stints = collapseStints(records);
 
   return (
-    <div style={cardStyle}>
+    <div style={cardStyle} ref={cardRef}>
       <CloseButton onClose={onClose} />
       <div style={{ fontSize: 14, fontWeight: 700, paddingRight: 16 }}>
         {ribbon.name}

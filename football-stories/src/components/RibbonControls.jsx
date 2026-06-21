@@ -178,7 +178,7 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
 
         <div style={{ flex: 1 }} />
         <span style={{ color: "#666", fontSize: 11.5 }}>
-          <b>{nSel}</b> player ribbon{nSel === 1 ? "" : "s"} (max {MAX_PLAYERS})
+          <b>{nSel}</b> player track{nSel === 1 ? "" : "s"} (max {MAX_PLAYERS})
           {nSel > 0 && (
             <button
               onClick={clearPlayers}

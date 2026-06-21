@@ -27,10 +27,12 @@ const Main = forwardRef(function Main(
     focusYear,
     onFocusConsumed,
     ribbonConfig = { roles: {}, players: [] },
+    onFollow,
   },
   externalRef,
 ) {
   const containerRef = useRef(null);
+  const svgRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   useImperativeHandle(externalRef, () => containerRef.current, []);
@@ -58,6 +60,27 @@ const Main = forwardRef(function Main(
   }, []);
 
   const { width, height } = dimensions;
+
+  // Optional-display toggles from the Settings drawer. Absent key => on.
+  const showWinRate = settings?.showWinRate !== false;
+  const showPlayoffs = settings?.showPlayoffs !== false;
+
+  // iOS Safari does NOT reliably honor `touch-action: none` when the pointer
+  // target is an SVG: it claims one-finger drags as page scroll and fires
+  // pointercancel mid-gesture, so panning stutters or locks up entirely (every
+  // other mobile browser is fine). The only robust fix is a NON-passive
+  // touchmove listener that preventDefaults the native scroll. React registers
+  // its synthetic onTouchMove/onWheel as PASSIVE, so preventDefault() inside a
+  // React handler is silently ignored — we must bind manually here. Pointer
+  // events still fire normally; this only suppresses the browser's own scroll.
+  const ready = width > 0 && height > 0;
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const block = (e) => e.preventDefault();
+    el.addEventListener("touchmove", block, { passive: false });
+    return () => el.removeEventListener("touchmove", block);
+  }, [ready]);
 
   // ---- interaction state ----
   // Draft classes expanded to full rows while in compact (Zoom 2) mode.
@@ -113,6 +136,12 @@ const Main = forwardRef(function Main(
         kind: "player",
         approx: p.source === "approx",
         position: p.position,
+        // Career-follow links from the tenure pipeline.
+        prev_team: p.prev_team || null,
+        next_team: p.next_team || null,
+        entry: p.entry || null,
+        exit: p.exit || null,
+        conf: p.conf || null,
       });
     }
     return out;
@@ -131,8 +160,10 @@ const Main = forwardRef(function Main(
     height,
     focusYear,
     onFocusConsumed,
+    showPlayoffs,
   });
-  const { layout, scrollY, band, handlers, didDrag } = viewport;
+  const { layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY, railPan } =
+    viewport;
   didDragRef.current = didDrag;
 
   // Zooming out past Zoom 2 hides offseasons entirely; clear any expanded
@@ -178,10 +209,16 @@ const Main = forwardRef(function Main(
   return (
     <div
       ref={containerRef}
-      style={{ height: "100%", overflow: "hidden", position: "relative" }}
+      style={{
+        height: "100%",
+        overflow: "hidden",
+        position: "relative",
+        touchAction: "none",
+      }}
     >
       {width > 0 && height > 0 && (
         <svg
+          ref={svgRef}
           width={width}
           height={height}
           style={{ display: "block", touchAction: "none", cursor: "grab" }}
@@ -189,19 +226,35 @@ const Main = forwardRef(function Main(
         >
           {/* full-surface hit target so wheel/drag work over empty space too */}
           <rect x={0} y={0} width={width} height={height} fill="transparent" />
-          <TeamTimelineLayer
-            layout={layout}
-            scrollY={scrollY}
-            width={width}
-            height={height}
-            band={band}
-            moduleData={moduleData}
-            staff={spans}
-            pre1967={mapped?.pre1967}
-            adminById={adminById}
-            onSelectStaff={onSelectRibbon}
-            tapGuard={tapGuard}
-          />
+          {/* Horizontal "follow a career off the edge" pan: the WHOLE canvas
+              slides with the drag (anything less feels broken), exposing the
+              ribbon overhang past each edge. 0 at rest. */}
+          <g transform={railPan ? `translate(${railPan} 0)` : undefined}>
+            {/* Cosmetic zoom tween: vertically scale the rendered band about the
+                pinch/cursor midpoint so motion between discrete detail bands
+                reads as continuous. Identity (scale 1) at rest. */}
+            <g
+              transform={`translate(0 ${scaleAnchorY}) scale(1 ${visualScale}) translate(0 ${-scaleAnchorY})`}
+            >
+              <TeamTimelineLayer
+                layout={layout}
+                scrollY={scrollY}
+                width={width}
+                height={height}
+                band={band}
+                moduleData={moduleData}
+                staff={spans}
+                pre1967={mapped?.pre1967}
+                adminById={adminById}
+                onSelectStaff={onSelectRibbon}
+                tapGuard={tapGuard}
+                railPan={railPan}
+                onFollow={onFollow}
+                showWinRate={showWinRate}
+                showPlayoffs={showPlayoffs}
+              />
+            </g>
+          </g>
         </svg>
       )}
       <InfoCard selection={selected} adminById={adminById} onClose={closeCard} />

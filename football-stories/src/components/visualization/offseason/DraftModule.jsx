@@ -14,6 +14,7 @@ import {
   PICK_ROW_H,
   COMPACT_H,
   tierColor,
+  tierTextColor,
   picksForYear,
   isExpandedYear,
   classGradeFor,
@@ -36,7 +37,7 @@ function fmtScore(v) {
   return v == null ? "—" : Math.round(v);
 }
 
-function Header({ year, x, width, y, picks, grade }) {
+function Header({ x, width, y, picks, grade }) {
   const s = classSummary(picks);
   const right =
     s.scored > 0
@@ -44,13 +45,14 @@ function Header({ year, x, width, y, picks, grade }) {
       : `${s.count} pick${s.count === 1 ? "" : "s"}`;
   return (
     <g style={{ pointerEvents: "none" }}>
+      {/* the year is already on the offseason banner above — just label it */}
       <text x={x + 4} y={y + HEADER_H - 5} fontSize={11} fontWeight={600} fill="#333">
-        {year} Draft
+        Draft
       </text>
       {grade && (
         <g>
           <rect
-            x={x + 74}
+            x={x + 44}
             y={y + 2}
             width={24}
             height={HEADER_H - 6}
@@ -58,13 +60,13 @@ function Header({ year, x, width, y, picks, grade }) {
             fill={tierColor(grade.tier)}
           />
           <text
-            x={x + 86}
+            x={x + 56}
             y={y + HEADER_H / 2}
             fontSize={9}
             fontWeight={700}
             textAnchor="middle"
             dominantBaseline="middle"
-            fill="#fff"
+            fill={tierTextColor(grade.tier)}
           >
             {grade.tier}
             {grade.provisional ? "*" : ""}
@@ -147,7 +149,7 @@ function PickRow({ p, x, width, y, onSelect }) {
         textAnchor="middle"
         fontSize={9}
         fontWeight={700}
-        fill={tier ? "#fff" : "#999"}
+        fill={tier ? tierTextColor(tier) : "#5a5a5a"}
       >
         {tier ? tier + star : "–"}
       </text>
@@ -206,7 +208,7 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
         onClick={canToggle ? guarded(() => data.onToggleYear(year)) : undefined}
         style={canToggle ? { cursor: "pointer" } : undefined}
       />
-      <Header year={year} x={x} width={width} y={y} picks={picks} grade={grade} />
+      <Header x={x} width={width} y={y} picks={picks} grade={grade} />
       {!expanded ? (
         <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} />
       ) : (

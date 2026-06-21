@@ -36,6 +36,25 @@ import { geometryFor, bandAtLeast, DEFAULT_BAND } from "./detail.js";
 const OFF_FRAC = 0.4; // nominal time share of an offseason (axis/anchor only)
 const SEA_FRAC = 0.6; // nominal time share of a season   (OFF_FRAC + SEA_FRAC = 1)
 
+// The offseason renders as a full-width "year banner": a header band carrying
+// the big year, that season's record, and the all-time win-rate value. We
+// reserve real layout space for it (below any ribbon-entry reserve, above the
+// content modules) so the header never overlaps the draft class beneath it.
+const OFF_HEADER_FULL = 38; // header px in full mode    (zoom 3/4)
+const OFF_HEADER_COMPACT = 30; // header px in compact mode (zoom 2)
+
+// A season header strip sits at the TOP of each season block — under the
+// offseason paper, directly above the games — and lays out that year's record.
+// Only present when a banner is shown (i.e. the offseason isn't hidden).
+const SEASON_HEADER_FULL = 20; // record strip above the game rows (zoom 3/4)
+const SEASON_HEADER_COMPACT = 22; // record strip above the season line (zoom 2)
+
+// Postseason segment, stacked below the regular-season games (zoom 3/4 only):
+// at zoom 4 it's a "POSTSEASON" label + win/loss arrow rows for the playoff
+// games; at zoom 3 it collapses to a compact medal-bordered result strip.
+const POST_HEADER_H = 14; // label strip above the playoff arrow rows (zoom 4)
+const POST_RESULT_H = 22; // compact result strip (zoom 3)
+
 export function buildTimelineLayout({
   seasons,
   modules = [],
@@ -47,6 +66,7 @@ export function buildTimelineLayout({
   offseasonPadding = 6,
   minOffseasonHeight = 6,
   minSeasonHeight = 14,
+  showPlayoffs = true,
 }) {
   const geom = geometryFor(detailBand);
   const sorted = [...(seasons || [])].sort((a, b) => a.year - b.year);
@@ -68,8 +88,21 @@ export function buildTimelineLayout({
     // ---- OFFSEASON BLOCK (draft class `year`, sits above the season) ----
     const offY0 = y;
     const reserve = Math.max(0, reserveByYear[year] || 0);
+    // Header band height by mode; hidden bands get none (no banner there).
+    const headerH =
+      geom.offseason === "hidden"
+        ? 0
+        : geom.offseason === "full"
+          ? OFF_HEADER_FULL
+          : OFF_HEADER_COMPACT;
+    // Stacking order within the offseason block (top → bottom):
+    //   header (the year marker)  ->  ribbon-entry reserve  ->  content modules
+    // The year therefore sits ABOVE the incoming-ribbons area. ribbonTop marks
+    // where entry bands anchor (consumed by staffRibbonModel).
+    const ribbonTop = offY0 + headerH;
+    const bodyTop = ribbonTop + reserve;
     const moduleBoxes = [];
-    let cursor = offY0 + reserve + offseasonPadding;
+    let cursor = bodyTop + offseasonPadding;
     for (const m of activeModules) {
       const h = Math.max(
         0,
@@ -79,9 +112,11 @@ export function buildTimelineLayout({
       moduleBoxes.push({ id: m.id, module: m, y: cursor, height: h });
       cursor += h + offseasonPadding;
     }
+    // A banner year with no modules is still a real block: just its header.
+    const minOff = reserve + headerH + (headerH ? 0 : minOffseasonHeight);
     const offHeight = moduleBoxes.length
-      ? Math.max(minOffseasonHeight + reserve, cursor - offY0)
-      : minOffseasonHeight + reserve;
+      ? Math.max(minOff, cursor - offY0)
+      : minOff;
     const offY1 = offY0 + offHeight;
 
     const offBlock = {
@@ -91,6 +126,8 @@ export function buildTimelineLayout({
       y1: offY1,
       height: offHeight,
       reserve,
+      headerHeight: headerH,
+      ribbonTop,
       tStart: year - OFF_FRAC,
       tEnd: year,
       modules: moduleBoxes,
@@ -100,16 +137,51 @@ export function buildTimelineLayout({
 
     // ---- SEASON BLOCK (games of `year`, below its offseason) ----
     const seaY0 = y;
+    const seaHeaderH =
+      geom.offseason === "hidden"
+        ? 0
+        : geom.season.mode === "rows"
+          ? SEASON_HEADER_FULL
+          : SEASON_HEADER_COMPACT;
+    // When playoffs are toggled off, drop the postseason entirely: no result,
+    // no segment, and (in rows mode) the playoff game rows are filtered out
+    // below — so no layout space is reserved for any of it.
+    const playoffsResult = showPlayoffs ? s.season?.playoffs || null : null;
     let seaHeight;
     let gamePositions;
+    let postseason = null;
     if (geom.season.mode === "rows") {
       const rh = geom.season.gameRowHeight;
-      seaHeight = Math.max(minSeasonHeight, games.length * rh + seasonPadding);
-      const innerTop = seaY0 + seasonPadding / 2;
-      gamePositions = games.map((g, i) => ({ g, i, y: innerTop + (i + 0.5) * rh }));
+      // Regular-season games make the main block; playoff games are pulled out
+      // into the postseason segment below.
+      const reg = games.filter((g) => !g.is_playoff);
+      // No playoff rows at all when the toggle is off.
+      const post = showPlayoffs ? games.filter((g) => g.is_playoff) : [];
+      const regTop = seaY0 + seaHeaderH + seasonPadding / 2;
+      gamePositions = reg.map((g, i) => ({ g, i, y: regTop + (i + 0.5) * rh }));
+      let cursorY = regTop + reg.length * rh;
+      const isDetail = detailBand === "GAME_DETAIL"; // zoom 4
+      if (isDetail && post.length) {
+        const headerY = cursorY + seasonPadding;
+        const rowsTop = headerY + POST_HEADER_H;
+        postseason = {
+          kind: "rows",
+          y0: headerY,
+          headerH: POST_HEADER_H,
+          rowH: rh,
+          result: playoffsResult,
+          games: post.map((g, i) => ({ g, i, y: rowsTop + (i + 0.5) * rh })),
+        };
+        cursorY = rowsTop + post.length * rh;
+      } else if (!isDetail && (post.length || playoffsResult)) {
+        const stripY = cursorY + seasonPadding;
+        postseason = { kind: "result", y0: stripY, height: POST_RESULT_H, result: playoffsResult };
+        cursorY = stripY + POST_RESULT_H;
+      }
+      seaHeight = Math.max(minSeasonHeight, cursorY + seasonPadding / 2 - seaY0);
     } else {
-      seaHeight = Math.max(minSeasonHeight, geom.season.height);
-      const lineY = seaY0 + seaHeight / 2;
+      seaHeight = Math.max(minSeasonHeight, seaHeaderH + geom.season.height);
+      const lineY = seaY0 + seaHeaderH + (seaHeight - seaHeaderH) / 2;
       gamePositions = games.map((g, i) => ({ g, i, y: lineY }));
     }
     const seaY1 = seaY0 + seaHeight;
@@ -120,6 +192,8 @@ export function buildTimelineLayout({
       y0: seaY0,
       y1: seaY1,
       height: seaHeight,
+      seasonHeaderHeight: seaHeaderH,
+      postseason,
       tStart: year,
       tEnd: year + SEA_FRAC,
       mode: geom.season.mode,
