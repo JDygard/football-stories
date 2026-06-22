@@ -61,20 +61,6 @@ export default function SettingsDrawer({ settings = {}, onChange }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12.5 }}>
-      <div
-        style={{
-          padding: "10px 16px 8px",
-          borderBottom: "1px solid #e8eaef",
-          color: "#666",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 0.6,
-          textTransform: "uppercase",
-        }}
-      >
-        Display
-      </div>
-
       <div style={{ overflowY: "auto", flex: 1, padding: "6px 8px 10px" }}>
         {FEATURES.map((f) => {
           const on = isOn(f.key);
@@ -93,10 +79,7 @@ export default function SettingsDrawer({ settings = {}, onChange }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f4f6fa"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
             >
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, color: "#222", marginBottom: 2 }}>{f.label}</div>
-                <div style={{ color: "#888", fontSize: 11.5, lineHeight: 1.35 }}>{f.hint}</div>
-              </div>
+              <div style={{ flex: 1, fontWeight: 600, color: "#222" }}>{f.label}</div>
               <Toggle on={on} onClick={(e) => { e.stopPropagation(); toggle(f.key); }} />
             </div>
           );

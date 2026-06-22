@@ -48,8 +48,10 @@ function exitLabel(r) {
   return null; // active / unknown -> no claim
 }
 function entryLabel(r) {
+  // Arrow points in the direction the career is HEADED (rightward, onto this
+  // team), not back at the team they came from.
   if (r.entry === "from_team" && r.prevTeam)
-    return { text: `← ${teamName(r.prevTeam)}`, fid: r.prevTeam, year: Math.max(0, (r.from || 0) - 1), kind: "dest" };
+    return { text: `${teamName(r.prevTeam)} →`, fid: r.prevTeam, year: Math.max(0, (r.from || 0) - 1), kind: "dest" };
   if (r.entry === "drafted") return { text: "Drafted", kind: "term" };
   return null; // undrafted / origin -> no claim
 }

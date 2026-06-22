@@ -32,10 +32,7 @@ const Main = forwardRef(function Main(
   externalRef,
 ) {
   const containerRef = useRef(null);
-  const svgRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-  useImperativeHandle(externalRef, () => containerRef.current, []);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -65,23 +62,6 @@ const Main = forwardRef(function Main(
   const showWinRate = settings?.showWinRate !== false;
   const showPlayoffs = settings?.showPlayoffs !== false;
 
-  // iOS Safari does NOT reliably honor `touch-action: none` when the pointer
-  // target is an SVG: it claims one-finger drags as page scroll and fires
-  // pointercancel mid-gesture, so panning stutters or locks up entirely (every
-  // other mobile browser is fine). The only robust fix is a NON-passive
-  // touchmove listener that preventDefaults the native scroll. React registers
-  // its synthetic onTouchMove/onWheel as PASSIVE, so preventDefault() inside a
-  // React handler is silently ignored — we must bind manually here. Pointer
-  // events still fire normally; this only suppresses the browser's own scroll.
-  const ready = width > 0 && height > 0;
-  useEffect(() => {
-    const el = svgRef.current;
-    if (!el) return;
-    const block = (e) => e.preventDefault();
-    el.addEventListener("touchmove", block, { passive: false });
-    return () => el.removeEventListener("touchmove", block);
-  }, [ready]);
-
   // ---- interaction state ----
   // Draft classes expanded to full rows while in compact (Zoom 2) mode.
   const [expandedDraftYears, setExpandedDraftYears] = useState(() => new Set());
@@ -89,7 +69,6 @@ const Main = forwardRef(function Main(
   const [selected, setSelected] = useState(null);
 
   // tapGuard: lets click handlers ignore the click that trails a pan.
-  // Wired through a ref because the viewport hook is created below.
   const didDragRef = useRef(() => false);
   const tapGuard = useCallback(() => didDragRef.current(), []);
 
@@ -147,9 +126,8 @@ const Main = forwardRef(function Main(
     return out;
   }, [mapped, ribbonConfig]);
 
-  // Reserve vertical room in each entry year's offseason block for ALL
-  // ribbon entry bands (staff + players), so they occupy layout space
-  // instead of overlaying content.
+  // Reserve vertical room in each entry year's offseason block for ALL ribbon
+  // entry bands (staff + players) so they occupy layout space.
   const reserveByYear = useMemo(() => stripReserveByYear(spans), [spans]);
 
   const viewport = useTimelineViewport({
@@ -162,12 +140,17 @@ const Main = forwardRef(function Main(
     onFocusConsumed,
     showPlayoffs,
   });
-  const { layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY, railPan } =
-    viewport;
+  const {
+    layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY,
+    railPan, scrollRef, totalHeight,
+  } = viewport;
   didDragRef.current = didDrag;
 
-  // Zooming out past Zoom 2 hides offseasons entirely; clear any expanded
-  // draft classes so returning to Zoom 2 doesn't reflow unexpectedly.
+  // Expose the native scroll container (Header reads its scrollTop to hide/show).
+  useImperativeHandle(externalRef, () => scrollRef.current, [scrollRef]);
+
+  // Zooming out past Zoom 2 hides offseasons entirely; clear any expanded draft
+  // classes so returning to Zoom 2 doesn't reflow unexpectedly.
   const offseasonHidden = geometryFor(band).offseason === "hidden";
   useEffect(() => {
     if (offseasonHidden && expandedDraftYears.size > 0) {
@@ -175,9 +158,8 @@ const Main = forwardRef(function Main(
     }
   }, [offseasonHidden, expandedDraftYears]);
 
-  // Ribbon tap routing: player ribbons open the player card (with the
-  // real pick when this franchise drafted them), staff ribbons the staff
-  // card.
+  // Ribbon tap routing: player ribbons open the player card, staff ribbons the
+  // staff card.
   const pickById = useMemo(() => {
     const m = new Map();
     for (const p of draftSegment?.picks || []) {
@@ -206,57 +188,73 @@ const Main = forwardRef(function Main(
     [pickById],
   );
 
+  const ready = width > 0 && height > 0;
+
   return (
     <div
       ref={containerRef}
-      style={{
-        height: "100%",
-        overflow: "hidden",
-        position: "relative",
-        touchAction: "none",
-      }}
+      style={{ height: "100%", overflow: "hidden", position: "relative" }}
     >
-      {width > 0 && height > 0 && (
-        <svg
-          ref={svgRef}
-          width={width}
-          height={height}
-          style={{ display: "block", touchAction: "none", cursor: "grab" }}
-          {...handlers}
-        >
-          {/* full-surface hit target so wheel/drag work over empty space too */}
-          <rect x={0} y={0} width={width} height={height} fill="transparent" />
-          {/* Horizontal "follow a career off the edge" pan: the WHOLE canvas
-              slides with the drag (anything less feels broken), exposing the
-              ribbon overhang past each edge. 0 at rest. */}
-          <g transform={railPan ? `translate(${railPan} 0)` : undefined}>
-            {/* Cosmetic zoom tween: vertically scale the rendered band about the
-                pinch/cursor midpoint so motion between discrete detail bands
-                reads as continuous. Identity (scale 1) at rest. */}
-            <g
-              transform={`translate(0 ${scaleAnchorY}) scale(1 ${visualScale}) translate(0 ${-scaleAnchorY})`}
+      {/* Native scroll container: the OS owns vertical momentum/rubber-band.
+          touch-action:pan-y reserves vertical for the scroller and hands
+          horizontal drags to the rail-reveal pointer handlers. */}
+      <div
+        ref={scrollRef}
+        onScroll={handlers.onScroll}
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
+        onPointerLeave={handlers.onPointerLeave}
+        style={{
+          position: "absolute",
+          inset: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
+          touchAction: "pan-y",
+        }}
+      >
+        {/* Spacer giving the native scroll range = committed band height. */}
+        <div style={{ height: Math.max(totalHeight, height), position: "relative" }}>
+          {ready && (
+            <svg
+              width={width}
+              height={height}
+              style={{ position: "sticky", top: 0, display: "block" }}
             >
-              <TeamTimelineLayer
-                layout={layout}
-                scrollY={scrollY}
-                width={width}
-                height={height}
-                band={band}
-                moduleData={moduleData}
-                staff={spans}
-                pre1967={mapped?.pre1967}
-                adminById={adminById}
-                onSelectStaff={onSelectRibbon}
-                tapGuard={tapGuard}
-                railPan={railPan}
-                onFollow={onFollow}
-                showWinRate={showWinRate}
-                showPlayoffs={showPlayoffs}
-              />
-            </g>
-          </g>
-        </svg>
-      )}
+              <rect x={0} y={0} width={width} height={height} fill="transparent" />
+              {/* Horizontal "follow a career off the edge" pan: the whole canvas
+                  slides with the drag, exposing the ribbon overhang. */}
+              <g transform={railPan ? `translate(${railPan} 0)` : undefined}>
+                {/* Cosmetic zoom tween between detail bands. Identity at rest. */}
+                <g
+                  transform={`translate(0 ${scaleAnchorY}) scale(1 ${visualScale}) translate(0 ${-scaleAnchorY})`}
+                >
+                  <TeamTimelineLayer
+                    layout={layout}
+                    scrollY={scrollY}
+                    width={width}
+                    height={height}
+                    band={band}
+                    moduleData={moduleData}
+                    staff={spans}
+                    pre1967={mapped?.pre1967}
+                    adminById={adminById}
+                    onSelectStaff={onSelectRibbon}
+                    tapGuard={tapGuard}
+                    railPan={railPan}
+                    onFollow={onFollow}
+                    showWinRate={showWinRate}
+                    showPlayoffs={showPlayoffs}
+                  />
+                </g>
+              </g>
+            </svg>
+          )}
+        </div>
+      </div>
       <InfoCard selection={selected} adminById={adminById} onClose={closeCard} />
     </div>
   );

@@ -62,12 +62,16 @@ export function positionGroup(position) {
 
 export const STRIP_H = 16; // band thickness (horizontal AND vertical)
 export const STRIP_GAP = 0; // stacked bands sit flush; borders delineate
-// Tail columns stay full STRIP_H wide until the gutter they'd need
-// (slotCount * STRIP_H) overflows the width budget; past that they shrink
-// *continuously* toward MIN_TAIL_W (≈2px of visible color inside the 1px
-// borders) — no hard breakpoint, so we only reach the thin floor when the
-// count genuinely demands it.
-export const MIN_TAIL_W = 4;
+// Vertical-tail squish. Tails stay full STRIP_H wide through SQUISH_FULL_SLOTS
+// concurrent ribbons; beyond that they taper (capped just under full width so
+// the squish is visible from the very next ribbon) so the whole gutter stays
+// under ~6 full ribbons (SQUISH_BUDGET) and barely dents the draft columns.
+// Past MAX_TAIL_SLOTS the gutter is too crowded, so we stop adding columns and
+// drop the most-overlapping ribbons.
+export const MIN_TAIL_W = 6;
+const SQUISH_FULL_SLOTS = 4;
+const SQUISH_BUDGET = 6 * STRIP_H; // 96px ≈ width of 6 unadjusted ribbons
+const MAX_TAIL_SLOTS = Math.floor(SQUISH_BUDGET / MIN_TAIL_W); // 16
 // Resting inset of the tail gutter from the right screen edge: a 3px sliver
 // that exposes the "leaving" stub of exit bands (they still run to the true
 // edge) and seeds the drag-to-follow-a-career affordance.
@@ -110,9 +114,6 @@ export function buildStaffRibbons({
   layout,
   stripHeight = STRIP_H,
   gap = STRIP_GAP,
-  // Horizontal budget for the whole tail gutter. Tails stay full width until
-  // they'd collectively exceed this, then shrink. Infinity = never compress.
-  maxRailWidth = Infinity,
 } = {}) {
   if (!staff?.length || !layout?.blocks?.length) {
     return { ribbons: [], railWidth: 0, slotCount: 0, tailW: STRIP_H };
@@ -217,32 +218,39 @@ export function buildStaffRibbons({
     ? Math.max(...slotMap.values()) + 1
     : 0;
 
-  // Progressive width: full STRIP_H until the gutter overflows its budget,
-  // then shrink smoothly (floor MIN_TAIL_W). floor(budget/slotCount) makes the
-  // taper continuous in slotCount instead of snapping at a threshold.
-  const fullRail = slotCount * stripHeight;
+  // Too crowded: past MAX_TAIL_SLOTS columns the squished gutter can't fit any
+  // more usefully, so drop the highest-slot (most-overlapping) ribbons.
+  let shown = ribbons;
+  let slots = slotCount;
+  if (slotCount > MAX_TAIL_SLOTS) {
+    shown = ribbons.filter((r) => (slotMap.get(r.key) ?? 0) < MAX_TAIL_SLOTS);
+    slots = MAX_TAIL_SLOTS;
+  }
+
+  // Progressive width: full STRIP_H through SQUISH_FULL_SLOTS ribbons; beyond
+  // that, squeeze toward MIN_TAIL_W so the gutter stays under SQUISH_BUDGET.
+  // Capping the squished width at STRIP_H-1 makes the taper visible from the
+  // very first squished ribbon (the 5th).
   let tailW = stripHeight;
-  if (slotCount > 0 && fullRail > maxRailWidth) {
+  if (slots > SQUISH_FULL_SLOTS) {
     tailW = Math.max(
       MIN_TAIL_W,
-      Math.min(stripHeight, Math.floor(maxRailWidth / slotCount)),
+      Math.min(stripHeight - 1, Math.floor(SQUISH_BUDGET / slots)),
     );
   }
-  const railWidth = slotCount * tailW;
+  const railWidth = slots * tailW;
 
-  // Slot 0 sits rightmost (longest-running ribbons hug the screen edge),
-  // matching the original svgRight - (slot+1)*stripHeight scheme. Keep the
-  // slot index on each ribbon so the render layer can re-derive positions at a
-  // different tail width (e.g. expanded to full width while the gutter is
-  // dragged open).
-  for (const r of ribbons) {
+  // Slot 0 sits rightmost (longest-running ribbons hug the screen edge). Keep
+  // the slot index on each ribbon so the render layer can re-derive positions
+  // at a different tail width (e.g. expanded to full width on drag).
+  for (const r of shown) {
     const slot = slotMap.get(r.key) ?? 0;
     r.slot = slot;
     r.x = railWidth - (slot + 1) * tailW;
     r.width = tailW;
   }
 
-  return { ribbons, railWidth, slotCount, tailW };
+  return { ribbons: shown, railWidth, slotCount: slots, tailW };
 }
 
 // Scroll-dependent entry-band placement. Returns Map<ribbon.key,

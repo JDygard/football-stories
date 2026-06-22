@@ -447,12 +447,9 @@ export default function TeamTimelineLayer({
   showWinRate = true,
   showPlayoffs = true,
 }) {
-  // Budget for the tail gutter: tails stay full width until they'd eat more
-  // than this slice of the viewport, then taper (see buildStaffRibbons).
-  const maxRailWidth = Math.max(96, Math.min(520, Math.round((width || 0) * 0.42)));
   const ribbonLayout = useMemo(
-    () => buildStaffRibbons({ staff, layout, maxRailWidth }),
-    [staff, layout, maxRailWidth],
+    () => buildStaffRibbons({ staff, layout }),
+    [staff, layout],
   );
 
   // Cumulative franchise winrate AFTER EACH GAME, spanning the entire
