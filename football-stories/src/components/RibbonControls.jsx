@@ -193,6 +193,70 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
         </span>
       </div>
 
+      {/* selected set — the whole selection in one place, removable without
+          hunting through the tenure list (§4g) */}
+      {nSel > 0 && (
+        <div
+          style={{
+            padding: "7px 12px",
+            borderBottom: "1px solid #e8eaef",
+            background: "#fbfcfe",
+            maxHeight: 96,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#555", letterSpacing: 0.3 }}>
+              SELECTED
+            </span>
+            <span style={{ fontSize: 11, color: "#999" }}>{nSel}</span>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={clearPlayers}
+              style={{
+                border: "none", background: "none", color: "#b55",
+                cursor: "pointer", fontSize: 11, padding: 0,
+              }}
+            >
+              clear all
+            </button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {(config.players || []).map((p) => {
+              const g = positionGroup(p.position);
+              return (
+                <button
+                  key={p.player_id}
+                  onClick={() => togglePlayer(p)}
+                  title="Remove from tracks"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "3px 7px 3px 8px",
+                    borderRadius: 12,
+                    border: "1px solid #dfe3ea",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontSize: 11.5,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f4f6fa"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                >
+                  <span style={{
+                    width: 8, height: 8, borderRadius: 2,
+                    background: roleColor(g), display: "inline-block",
+                  }} />
+                  <span style={{ fontWeight: 600, color: "#222" }}>{p.name}</span>
+                  <span style={{ color: "#999" }}>
+                    {p.position || ""}{p.source === "approx" ? " ~" : ""}
+                  </span>
+                  <span style={{ color: "#aab", fontWeight: 700, fontSize: 14, lineHeight: 1 }}>×</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* tenure list */}
       <div style={{ overflowY: "auto", flex: 1, padding: "4px 6px 8px" }}>
         <div style={{ padding: "2px 8px 4px", color: "#999", fontSize: 11 }}>

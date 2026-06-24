@@ -44,3 +44,63 @@
 * {
   overscroll-behavior: none;
 }
+
+/* Gentle fade for draft-class content swapping between compact chips and full
+   pick rows (expand/collapse, and crossing into the detail bands). Subtle by
+   design — it softens the swap without animating the surrounding layout. */
+@keyframes draftReveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .draft-reveal {
+    animation: draftReveal 180ms ease-out both;
+  }
+}
+
+/* Zoom-level HUD toast: pop in, hold, fade out. Self-contained so the element
+   can be left mounted (at opacity 0) and simply replayed on the next change. */
+@keyframes zoomHudPop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  78% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+@keyframes zoomHudFade {
+  0% {
+    opacity: 0;
+  }
+  12%,
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.zoom-hud {
+  animation: zoomHudPop 1.5s ease both;
+}
+/* Reduced motion: keep the auto-fade (so it still disappears) but drop the
+   translate. */
+@media (prefers-reduced-motion: reduce) {
+  .zoom-hud {
+    animation-name: zoomHudFade;
+  }
+}

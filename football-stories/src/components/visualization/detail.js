@@ -31,6 +31,23 @@ export const DETAIL_GEOMETRY = {
 
 export const DEFAULT_BAND = "GAME_DETAIL";
 
+// Total user-facing zoom rungs (1 = most years on screen … 4 = every game).
+export const ZOOM_LEVELS = 4;
+
+// User-facing label for each internal band: the "Zoom N" rung (per the
+// glossary, the two least-detailed bands share rung 1) plus a plain-language
+// name. Consumed by the zoom HUD so the on-screen label always matches the
+// band that actually rendered (post-hysteresis).
+export const ZOOM_LABELS = {
+  GAME_DETAIL: { zoom: 4, name: "Every game" },
+  GAME_BANDS: { zoom: 3, name: "Game by game" },
+  SEASON_LINES: { zoom: 2, name: "Season by season" },
+  ERA_SUMMARY: { zoom: 1, name: "Eras" },
+  FRANCHISE_OVERVIEW: { zoom: 1, name: "Franchise" },
+};
+
+export const zoomLabelFor = (band) => ZOOM_LABELS[band] || ZOOM_LABELS[DEFAULT_BAND];
+
 export const bandRank = (band) => {
   const i = DETAIL_BANDS.indexOf(band);
   return i === -1 ? 0 : i;

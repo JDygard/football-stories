@@ -11,6 +11,8 @@ football-stories/node_modules
 football-stories/public/data
 football-stories/public/data
 football-stories/*.md
+football-stories/_d.mjs
+football-stories/_parse_check.mjs
 football-stories-bak
 
 dist

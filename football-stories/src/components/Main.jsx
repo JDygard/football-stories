@@ -10,6 +10,7 @@ import {
 } from "react";
 import TeamTimelineLayer from "./visualization/TeamTimelineLayer.jsx";
 import InfoCard from "./InfoCard.jsx";
+import ZoomHud from "./ZoomHud.jsx";
 import useTimelineViewport from "../hooks/useTimelineViewport.js";
 import { getEnabledModules, buildModuleData } from "./visualization/offseason/registry.js";
 import { geometryFor } from "./visualization/detail.js";
@@ -256,6 +257,7 @@ const Main = forwardRef(function Main(
         </div>
       </div>
       <InfoCard selection={selected} adminById={adminById} onClose={closeCard} />
+      <ZoomHud band={band} />
     </div>
   );
 });

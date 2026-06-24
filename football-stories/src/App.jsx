@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import Header from './components/header/Header.jsx'
 import Main from './components/Main.jsx'
-import Footer from './components/Footer.jsx'
+import Footer, { BAR_H } from './components/Footer.jsx'
 import LeagueView from './components/LeagueView.jsx'
 import MethodologyView from './components/MethodologyView.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
@@ -128,9 +128,16 @@ function App() {
 
   return (
     <ErrorBoundary fallback={<div>Something went wrong.</div>}>
+      {/* Reserve the fixed footer BAR's height (border-box padding) so the
+          scroll area ends above it — otherwise the bottom BAR_H of content
+          (latest season) is parked behind the bar and can't be scrolled into
+          view. dvh keeps this aligned with the visual viewport on iOS, where
+          the fixed bar sits at the dynamic-viewport bottom, not the 100vh one. */}
       <div style={{
-        maxHeight: '100vh',
-        height: "100vh",
+        maxHeight: '100dvh',
+        height: '100dvh',
+        boxSizing: 'border-box',
+        paddingBottom: BAR_H,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column'

@@ -137,36 +137,38 @@ export default function Header({
         <div style={{ fontSize: "14px", fontWeight: 600 }}>Football Stories</div>
         <div style={{ flex: 1 }} />
 
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div
-            style={{
-              width: "80px",
-              height: "24px",
-              background: "#eee",
-              borderRadius: "4px"
-            }}
-          >
-            <TeamTab
-              teamId={selectedTeam}
-              onOpen={() => setTeamSelectOpen(true)}
-            />
-          </div>
-
-          <input
-            type="text"
-            placeholder="Search player/coach/owner"
-            style={{
-              width: "160px",
-              height: "24px",
-              padding: "0 8px",
-              fontSize: "12px",
-              borderRadius: "4px",
-              border: "1px solid #ccc",
-              outline: "none",
-              boxSizing: "border-box"
-            }}
+        {/* centered team pill — the header's focal point */}
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 1,
+          }}
+        >
+          <TeamTab
+            teamId={selectedTeam}
+            onOpen={() => setTeamSelectOpen(true)}
           />
         </div>
+
+        <input
+          type="text"
+          placeholder="Search player/coach/owner"
+          style={{
+            width: "160px",
+            height: "24px",
+            padding: "0 8px",
+            fontSize: "12px",
+            borderRadius: "4px",
+            border: "1px solid #ccc",
+            outline: "none",
+            boxSizing: "border-box",
+            position: "relative",
+            zIndex: 2,
+          }}
+        />
       </motion.header>
 
       {menuOpen && (
@@ -206,8 +208,6 @@ export default function Header({
             >
               ⓘ How grades work
             </MenuItem>
-            <MenuItem disabled>📽 Showcases — coming soon</MenuItem>
-            <MenuItem disabled>⚙ Settings — coming soon</MenuItem>
           </div>
         </>
       )}

@@ -209,23 +209,29 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
         style={canToggle ? { cursor: "pointer" } : undefined}
       />
       <Header x={x} width={width} y={y} picks={picks} grade={grade} />
+      {/* Keyed by mode so the fade replays when the class actually toggles
+          between compact chips and full rows, not on every scroll frame. */}
       {!expanded ? (
-        <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} />
+        <g key="chips" className="draft-reveal">
+          <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} />
+        </g>
       ) : (
-        picks.map((p, i) => (
-          <PickRow
-            key={p.player_id || `${year}-${i}`}
-            p={p}
-            x={x}
-            width={width}
-            y={y + HEADER_H + i * PICK_ROW_H}
-            onSelect={
-              typeof data.onSelectPick === "function"
-                ? guarded(() => data.onSelectPick(p))
-                : undefined
-            }
-          />
-        ))
+        <g key="rows" className="draft-reveal">
+          {picks.map((p, i) => (
+            <PickRow
+              key={p.player_id || `${year}-${i}`}
+              p={p}
+              x={x}
+              width={width}
+              y={y + HEADER_H + i * PICK_ROW_H}
+              onSelect={
+                typeof data.onSelectPick === "function"
+                  ? guarded(() => data.onSelectPick(p))
+                  : undefined
+              }
+            />
+          ))}
+        </g>
       )}
     </g>
   );

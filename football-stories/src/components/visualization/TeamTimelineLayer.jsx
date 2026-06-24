@@ -10,7 +10,7 @@
 // the viewport top), vertical tail in the right gutter, exit band trailing
 // off the right edge — all anchored to the same layout coordinates.
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { geometryFor } from "./detail.js";
 import { buildStaffRibbons, PEEK } from "./staffRibbonModel.js";
 import StaffRibbonLayer from "./StaffRibbonLayer.jsx";
@@ -108,7 +108,7 @@ function SeasonHeader({ block, contentLeft, contentRight, meta, showPlayoffs = t
 // One win/loss arrow row: franchise green (left, by its own score) vs opponent
 // red (right), split by score, with an arrow-tip bump marking the win/loss and
 // a grey hairline along the boundary. Shared by regular-season and postseason.
-function GameRow({ g, y, rh, contentLeft, contentRight, cw }) {
+const GameRow = memo(function GameRow({ g, y, rh, contentLeft, contentRight, cw }) {
   const rowH = Math.max(3, rh - 2);
   const labels = rh >= 12;
   const pf = g.points_for ?? 0;
@@ -153,13 +153,13 @@ function GameRow({ g, y, rh, contentLeft, contentRight, cw }) {
       )}
     </g>
   );
-}
+});
 
 // The postseason segment under a season's games. Zoom 4: a "POSTSEASON" label
 // (medal-accented by finish) over win/loss arrow rows for the playoff games.
 // Zoom 3: a compact strip that just states the result, gold-bordered for a
 // title, silver for runner-up (other finishes take their medal color).
-function PostseasonSection({ post, contentLeft, contentRight, cw }) {
+const PostseasonSection = memo(function PostseasonSection({ post, contentLeft, contentRight, cw }) {
   if (!post) return null;
   const medal = playoffMedal(post.result);
   if (post.kind === "result") {
@@ -207,9 +207,9 @@ function PostseasonSection({ post, contentLeft, contentRight, cw }) {
       ))}
     </g>
   );
-}
+});
 
-function SeasonBlock({ block, contentLeft, contentRight, centerX, cw, labelInline, meta, showPlayoffs = true }) {
+const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight, centerX, cw, labelInline, meta, showPlayoffs = true }) {
   const sm = block.season || {};
   const raw = sm.season || {};
   const header = (
@@ -282,7 +282,7 @@ function SeasonBlock({ block, contentLeft, contentRight, centerX, cw, labelInlin
       )}
     </g>
   );
-}
+});
 
 function recordStr(m, showPlayoffs = true) {
   if (!m) return "";
@@ -308,7 +308,7 @@ function divisionLabel(s) {
 // fronted by a header carrying the minimalist sans year (far left) and the
 // all-time overall-winrate pill in line with it (right) — both above the draft.
 // Winrate is hidden at zoom 4. Content modules (draft, …) stack below.
-function OffseasonBlock({
+const OffseasonBlock = memo(function OffseasonBlock({
   block,
   contentLeft,
   contentRight,
@@ -332,16 +332,34 @@ function OffseasonBlock({
   const big = offMode === "full";
   const yearSize = big ? 24 : 19;
 
-  // Overall winrate pill, right-aligned and vertically in line with the year.
-  // Hidden at zoom 4 (GAME_DETAIL), where individual games are the focus.
+  // Overall winrate pill, centered on the point where the all-time win-rate
+  // curve passes through this year's header line, and vertically in line with
+  // the year. Reads "<##>% (<wins>/<losses>)" with a stock-ticker trend caret:
+  // green up if the franchise pct improved since last year, red down if it
+  // receded. Hidden at zoom 4 (GAME_DETAIL), where games are the focus.
   let win = null;
   if (showWinRate && headerH > 0 && detailBand !== "GAME_DETAIL" && meta && meta.enterPct != null) {
     const fs = big ? 11 : 10;
-    const label = `Franchise record: ${(meta.enterPct * 100).toFixed(1)}%`;
-    const w = Math.round(label.length * fs * 0.52) + 16; // hug the text
+    const pct = Math.round(meta.enterPct * 100);
+    const label = `${pct}% (${meta.enterWins}/${meta.enterLosses})`;
     const ph = Math.min(headerH - 8, 18);
-    const cx = contentRight - 6 - w / 2; // right-aligned in the content
-    win = { fs, label, w, ph, cx };
+    const caretW = fs * 0.62;
+    const gap = 4;
+    const textW = Math.round(label.length * fs * 0.52);
+    const w = caretW + gap + textW + 16; // caret + gap + text + side padding
+    // x where the curve crosses this header line, clamped inside the content
+    const curveX = contentLeft + meta.enterPct * cw;
+    const cx = Math.max(contentLeft + w / 2, Math.min(contentRight - w / 2, curveX));
+    // trend vs the prior season's entering pct: 1 up / -1 down / 0 flat|first
+    const dir =
+      meta.prevPct == null
+        ? 0
+        : meta.enterPct > meta.prevPct
+          ? 1
+          : meta.enterPct < meta.prevPct
+            ? -1
+            : 0;
+    win = { fs, label, w, ph, cx, caretW, gap, dir };
   }
 
   return (
@@ -375,30 +393,48 @@ function OffseasonBlock({
                 {block.year}
               </text>
 
-              {/* overall winrate, in line with the year, above the draft */}
-              {win && (
-                <g>
-                  <rect
-                    x={win.cx - win.w / 2}
-                    y={headMid - win.ph / 2}
-                    width={win.w}
-                    height={win.ph}
-                    rx={win.ph / 2}
-                    fill={CURVE}
-                  />
-                  <text
-                    x={win.cx}
-                    y={headMid}
-                    fontSize={win.fs}
-                    fontWeight={600}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill="#ffffff"
-                  >
-                    {win.label}
-                  </text>
-                </g>
-              )}
+              {/* overall winrate, centered on the curve crossing, with a
+                  green-up / red-down trend caret, above the draft */}
+              {win && (() => {
+                const innerLeft = win.cx - win.w / 2 + 8;
+                const caretLeft = innerLeft;
+                const textX = innerLeft + win.caretW + win.gap;
+                const ch = win.caretW * 0.92; // caret triangle height
+                const up = `${caretLeft},${headMid + ch / 2} ${caretLeft + win.caretW},${headMid + ch / 2} ${caretLeft + win.caretW / 2},${headMid - ch / 2}`;
+                const down = `${caretLeft},${headMid - ch / 2} ${caretLeft + win.caretW},${headMid - ch / 2} ${caretLeft + win.caretW / 2},${headMid + ch / 2}`;
+                return (
+                  <g>
+                    <rect
+                      x={win.cx - win.w / 2}
+                      y={headMid - win.ph / 2}
+                      width={win.w}
+                      height={win.ph}
+                      rx={win.ph / 2}
+                      fill={CURVE}
+                    />
+                    {win.dir !== 0 && (
+                      <polygon
+                        points={win.dir > 0 ? up : down}
+                        fill={win.dir > 0 ? "#4ade80" : "#ff6b6b"}
+                        stroke="#ffffff"
+                        strokeWidth={0.75}
+                        strokeLinejoin="round"
+                      />
+                    )}
+                    <text
+                      x={win.dir !== 0 ? textX : win.cx}
+                      y={headMid}
+                      fontSize={win.fs}
+                      fontWeight={600}
+                      textAnchor={win.dir !== 0 ? "start" : "middle"}
+                      dominantBaseline="central"
+                      fill="#ffffff"
+                    >
+                      {win.label}
+                    </text>
+                  </g>
+                );
+              })()}
 
               {/* hairline closing the header off from the content below */}
               <line
@@ -426,11 +462,11 @@ function OffseasonBlock({
       ))}
     </g>
   );
-}
+});
 
 const RAIL_PAD = 10; // gap between timeline content and the tail gutter
 
-export default function TeamTimelineLayer({
+const TeamTimelineLayer = memo(function TeamTimelineLayer({
   layout,
   scrollY = 0,
   width,
@@ -496,11 +532,16 @@ export default function TeamTimelineLayer({
     let w = pre1967?.wins || 0;
     let t = pre1967?.ties || 0;
     let n = (pre1967?.wins || 0) + (pre1967?.losses || 0) + (pre1967?.ties || 0);
+    let prevPct = null; // entering-pct of the PRIOR season, for the trend caret
     for (const b of layout.blocks) {
       if (b.type !== "season") continue;
       const raw = b.season?.season || {};
+      const enterPct = n > 0 ? (w + t / 2) / n : null;
       map.set(b.year, {
-        enterPct: n > 0 ? (w + t / 2) / n : null,
+        enterPct,
+        enterWins: w, // cumulative all-time record ENTERING this year
+        enterLosses: n - w - t,
+        prevPct, // prior year's entering-pct (null for the first season)
         wins: raw.wins ?? 0,
         losses: raw.losses ?? 0,
         ties: raw.ties ?? 0,
@@ -508,6 +549,7 @@ export default function TeamTimelineLayer({
         pointDiff: raw.point_diff ?? null,
         divisionFinish: raw.division_finish || null,
       });
+      prevPct = enterPct;
       const post = b.postseason?.games || [];
       const seq = post.length ? [...(b.games || []), ...post] : b.games || [];
       for (const { g } of seq) {
@@ -519,8 +561,6 @@ export default function TeamTimelineLayer({
     return map;
   }, [layout, pre1967]);
 
-  if (!layout || !width || !height) return null;
-
   const railWidth = ribbonLayout.railWidth;
   // Tails sit just inside the right screen edge (inset by PEEK so exit bands
   // leave a 3px leaving-stub); exit bands still run off-screen from there.
@@ -531,12 +571,31 @@ export default function TeamTimelineLayer({
     : width - MARGIN.right;
   const cw = Math.max(0, contentRight - contentLeft);
   const centerX = (contentLeft + contentRight) / 2;
-  const offMode = geometryFor(band).offseason;
 
-  // virtualize: only blocks intersecting [scrollY, scrollY+height] (+pad)
-  const vTop = scrollY - 60;
+  // virtualize: only blocks intersecting [scrollY, scrollY+height] (+pad).
+  // Memoized so a scroll that doesn't change which blocks are visible keeps the
+  // same array identity — letting the memoized children skip re-rendering.
   const vBot = scrollY + height + 60;
-  const visible = layout.blocks.filter((b) => b.y1 > vTop && b.y0 < vBot);
+  const visible = useMemo(() => {
+    if (!layout?.blocks) return [];
+    const top = scrollY - 60;
+    const bot = scrollY + height + 60;
+    return layout.blocks.filter((b) => b.y1 > top && b.y0 < bot);
+  }, [layout, scrollY, height]);
+
+  // The win-rate polyline spans the full timeline height (it's drawn behind the
+  // virtualized blocks), so build its point string once per layout/geometry
+  // change instead of re-joining ~all games on every scroll frame.
+  const winCurvePoints = useMemo(() => {
+    if (!winCurve) return null;
+    return winCurve
+      .map(([y, r]) => `${(contentLeft + r * cw).toFixed(1)},${y.toFixed(1)}`)
+      .join(" ");
+  }, [winCurve, contentLeft, cw]);
+
+  if (!layout || !width || !height) return null;
+
+  const offMode = geometryFor(band).offseason;
 
   return (
     <>
@@ -547,6 +606,32 @@ export default function TeamTimelineLayer({
       </filter>
     </defs>
     <g transform={`translate(0, ${-scrollY})`}>
+      {/* all-time win-rate curve (0..1 across the content width), drawn BEHIND
+          the blocks so each opaque offseason banner — and the franchise-record
+          pill that rides on it — cleanly occludes the line where it passes
+          through. The line stays visible across the season/game rows.
+          Hidden at zoom 4 (GAME_DETAIL), where individual games are the focus. */}
+      {showWinRate && winCurve && band !== "GAME_DETAIL" && (
+        <g style={{ pointerEvents: "none" }}>
+          <line
+            x1={contentLeft + cw / 2}
+            x2={contentLeft + cw / 2}
+            y1={0}
+            y2={layout.totalHeight}
+            stroke="#d8dde6"
+            strokeWidth={1}
+            strokeDasharray="2 6"
+          />
+          <polyline
+            fill="none"
+            stroke={CURVE}
+            strokeWidth={1.5}
+            strokeOpacity={0.7}
+            points={winCurvePoints}
+          />
+        </g>
+      )}
+
       {visible.map((b) =>
         b.type === "season" ? (
           <SeasonBlock
@@ -575,32 +660,6 @@ export default function TeamTimelineLayer({
             showWinRate={showWinRate}
           />
         ),
-      )}
-
-      {/* all-time win-rate curve (0..1 across the content width), drawn OVER
-          the banners so the labeled line stays crisp through every year.
-          Hidden at zoom 4 (GAME_DETAIL), where individual games are the focus. */}
-      {showWinRate && winCurve && band !== "GAME_DETAIL" && (
-        <g style={{ pointerEvents: "none" }}>
-          <line
-            x1={contentLeft + cw / 2}
-            x2={contentLeft + cw / 2}
-            y1={0}
-            y2={layout.totalHeight}
-            stroke="#d8dde6"
-            strokeWidth={1}
-            strokeDasharray="2 6"
-          />
-          <polyline
-            fill="none"
-            stroke={CURVE}
-            strokeWidth={1.5}
-            strokeOpacity={0.7}
-            points={winCurve
-              .map(([y, r]) => `${(contentLeft + r * cw).toFixed(1)},${y.toFixed(1)}`)
-              .join(" ")}
-          />
-        </g>
       )}
 
       {/* year labels only at the most-zoomed-out bands; otherwise the banner
@@ -639,4 +698,6 @@ export default function TeamTimelineLayer({
 
     </>
   );
-}
+});
+
+export default TeamTimelineLayer;

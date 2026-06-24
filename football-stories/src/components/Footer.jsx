@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import RibbonControls from "./RibbonControls.jsx";
 import SettingsDrawer from "./SettingsDrawer.jsx";
 
-const BAR_H = 44;
+export const BAR_H = 44;
 const DRAWER_H = 300;
 
 const ACCENT = "#2d6cdf";
