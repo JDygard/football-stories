@@ -148,6 +148,7 @@ function App() {
           setSelectedTeam={selectTeam}
           onOpenLeague={() => setLeagueOpen(true)}
           onOpenMethodology={() => setMethodologyOpen(true)}
+          onSearchSelect={goTo}
         />
         <div style={{ width: '100vw', flex: 1, height: '100%' }}>
           <Main

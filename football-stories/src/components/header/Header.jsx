@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion, useAnimation } from "framer-motion";
 import TeamTab from "./TeamTab";
 import TeamSelect from "./TeamSelect";
+import SearchBox from "./SearchBox";
 
 const HEADER_H = 48;
 const HIDE_THRESHOLD = 0;
@@ -41,6 +42,7 @@ export default function Header({
   setSelectedTeam,
   onOpenLeague,
   onOpenMethodology,
+  onSearchSelect,
 }) {
   const controls = useAnimation();
 
@@ -119,56 +121,35 @@ export default function Header({
           position: "relative"
         }}
       >
-        <button
-          aria-label="Menu"
-          onClick={() => setMenuOpen((o) => !o)}
-          style={{
-            border: "none",
-            background: "none",
-            fontSize: 18,
-            cursor: "pointer",
-            padding: "2px 8px 2px 0",
-            color: "#333",
-            lineHeight: 1,
-          }}
-        >
-          ☰
-        </button>
-        <div style={{ fontSize: "14px", fontWeight: 600 }}>Football Stories</div>
-        <div style={{ flex: 1 }} />
-
-        {/* centered team pill — the header's focal point */}
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 1,
-          }}
-        >
-          <TeamTab
-            teamId={selectedTeam}
-            onOpen={() => setTeamSelectOpen(true)}
-          />
+        {/* left: hamburger */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
+          <button
+            aria-label="Menu"
+            onClick={() => setMenuOpen((o) => !o)}
+            style={{
+              border: "none",
+              background: "none",
+              fontSize: 18,
+              cursor: "pointer",
+              padding: "2px 8px 2px 0",
+              color: "#333",
+              lineHeight: 1,
+            }}
+          >
+            ☰
+          </button>
         </div>
 
-        <input
-          type="text"
-          placeholder="Search player/coach/owner"
-          style={{
-            width: "160px",
-            height: "24px",
-            padding: "0 8px",
-            fontSize: "12px",
-            borderRadius: "4px",
-            border: "1px solid #ccc",
-            outline: "none",
-            boxSizing: "border-box",
-            position: "relative",
-            zIndex: 2,
-          }}
+        {/* center: team pill */}
+        <TeamTab
+          teamId={selectedTeam}
+          onOpen={() => setTeamSelectOpen(true)}
         />
+
+        {/* right: search */}
+        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
+          <SearchBox onSelect={onSearchSelect} />
+        </div>
       </motion.header>
 
       {menuOpen && (
