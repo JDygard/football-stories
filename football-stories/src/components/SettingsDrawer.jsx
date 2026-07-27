@@ -6,16 +6,27 @@
 // The optional features we expose. Add a row here to surface a new toggle;
 // the rendering side reads the same keys (see Main -> TeamTimelineLayer /
 // buildTimelineLayout).
+// `defaultOn` is the state when the key is absent from settings. Most features
+// are on by default (absent => on); the availability-adjusted grade is a lens
+// that defaults OFF so the standard "value delivered" grade is the baseline.
 const FEATURES = [
   {
     key: "showWinRate",
     label: "Overall win-rate",
     hint: "The all-time franchise win-rate curve over the timeline, plus the % pill in each year banner.",
+    defaultOn: true,
   },
   {
     key: "showPlayoffs",
     label: "Playoffs",
     hint: "Postseason segments, playoff result strips, and the playoff-finish medals.",
+    defaultOn: true,
+  },
+  {
+    key: "availabilityAdjusted",
+    label: "Availability-adjusted grades",
+    hint: "Grade picks on production per playing time, so a productive career cut short by injury isn't scored like a bust. Off = standard 'value delivered' grade.",
+    defaultOn: false,
   },
 ];
 
@@ -56,18 +67,21 @@ function Toggle({ on, onClick }) {
 }
 
 export default function SettingsDrawer({ settings = {}, onChange }) {
-  const isOn = (key) => settings[key] !== false; // absent => on
-  const toggle = (key) => onChange({ ...settings, [key]: !isOn(key) });
+  // absent => the feature's default (most on; the adjusted-grade lens off).
+  const isOn = (key, defaultOn = true) =>
+    settings[key] === undefined ? defaultOn : !!settings[key];
+  const toggle = (f) =>
+    onChange({ ...settings, [f.key]: !isOn(f.key, f.defaultOn ?? true) });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12.5 }}>
       <div style={{ overflowY: "auto", flex: 1, padding: "6px 8px 10px" }}>
         {FEATURES.map((f) => {
-          const on = isOn(f.key);
+          const on = isOn(f.key, f.defaultOn ?? true);
           return (
             <div
               key={f.key}
-              onClick={() => toggle(f.key)}
+              onClick={() => toggle(f)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -79,8 +93,13 @@ export default function SettingsDrawer({ settings = {}, onChange }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f4f6fa"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
             >
-              <div style={{ flex: 1, fontWeight: 600, color: "#222" }}>{f.label}</div>
-              <Toggle on={on} onClick={(e) => { e.stopPropagation(); toggle(f.key); }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, color: "#222" }}>{f.label}</div>
+                {f.hint && (
+                  <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{f.hint}</div>
+                )}
+              </div>
+              <Toggle on={on} onClick={(e) => { e.stopPropagation(); toggle(f); }} />
             </div>
           );
         })}

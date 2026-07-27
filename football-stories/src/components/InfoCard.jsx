@@ -6,7 +6,7 @@
 // coverage numbers — no interception column for Peyton Manning.
 
 import { useEffect, useRef, useState } from "react";
-import { tierColor, tierTextColor } from "./visualization/offseason/draftModel.js";
+import { tierColor, tierTextColor, gradeOf } from "./visualization/offseason/draftModel.js";
 import { ROLE_COLORS } from "./visualization/staffRibbonModel.js";
 import { roleLabelFromFlags } from "../utils/getPersonnelTitle.js";
 
@@ -164,7 +164,7 @@ function CloseButton({ onClose }) {
   );
 }
 
-function PlayerCard({ pick, onClose }) {
+function PlayerCard({ pick, onClose, adjusted }) {
   const [career, setCareer] = useState(pick.career || null);
   const cardRef = useDismiss(onClose);
 
@@ -182,10 +182,11 @@ function PlayerCard({ pick, onClose }) {
     };
   }, [pick.player_id]);
 
-  const tier = pick.value?.tier ?? null;
-  const provisional = !!pick.value?.provisional;
-  const score = pick.value?.score;
-  const pct = pick.value?.percentile;
+  const g = gradeOf(pick.value, adjusted);
+  const tier = g.tier;
+  const provisional = g.provisional;
+  const score = g.score;
+  const pct = g.percentile;
   const lastYear = career?.last_year ?? pick.career?.last_year;
   const hof = career?.hof ?? pick.career?.hof;
 
@@ -218,6 +219,7 @@ function PlayerCard({ pick, onClose }) {
           <span style={{ color: "#555" }}>
             {Math.round(score)} / 100
             {pct != null ? ` · ${Math.round(pct * 100)}th pct` : ""}
+            {adjusted ? " · availability-adj." : ""}
           </span>
         ) : (
           <span style={{ color: "#999" }}>not yet graded</span>
@@ -306,7 +308,7 @@ function StaffCard({ ribbon, adminById, onClose }) {
   );
 }
 
-export default function InfoCard({ selection, adminById, onClose }) {
+export default function InfoCard({ selection, adminById, onClose, adjusted }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -317,7 +319,7 @@ export default function InfoCard({ selection, adminById, onClose }) {
 
   if (!selection) return null;
   if (selection.type === "player") {
-    return <PlayerCard pick={selection.pick} onClose={onClose} />;
+    return <PlayerCard pick={selection.pick} onClose={onClose} adjusted={adjusted} />;
   }
   if (selection.type === "staff") {
     return (

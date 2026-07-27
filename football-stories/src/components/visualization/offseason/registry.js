@@ -30,6 +30,7 @@ export function buildModuleData({
   onToggleDraftYear,
   onSelectPick,
   tapGuard,
+  adjusted = false,
 } = {}) {
   return {
     draftByYear: draftSegment ? groupPicksByYear(draftSegment.picks) : {},
@@ -39,5 +40,8 @@ export function buildModuleData({
     onToggleYear: onToggleDraftYear,
     onSelectPick,
     tapGuard,
+    // Availability-adjusted grade lens (Settings toggle). Only affects which
+    // per-pick score/tier is displayed; layout is unchanged.
+    adjusted,
   };
 }

@@ -374,7 +374,6 @@ const OffseasonBlock = memo(function OffseasonBlock({
             width={fullWidth}
             height={block.height}
             fill={OFF_PAPER}
-            filter="url(#offPaperShadow)"
           />
 
           {headerH > 0 && (
@@ -600,10 +599,16 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
   return (
     <>
     <defs>
-      {/* soft elevation for the offseason "paper" surface */}
-      <filter id="offPaperShadow" x="-5%" y="-60%" width="110%" height="220%">
-        <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#3a2f1a" floodOpacity="0.18" />
-      </filter>
+      {/* Soft elevation for the offseason "paper" cards. This used to be an
+          feDropShadow filter, but SVG filters rasterize on the CPU and
+          re-rasterize on every scroll/zoom transform — with many cards visible
+          at Zoom 2 that was the iOS stutter. A linear-gradient fill is
+          GPU-composited and free under transforms; it's painted as a short
+          fading strip beneath each card (see the offseason shadow pass below). */}
+      <linearGradient id="offPaperShadow" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#3a2f1a" stopOpacity="0.18" />
+        <stop offset="100%" stopColor="#3a2f1a" stopOpacity="0" />
+      </linearGradient>
     </defs>
     <g transform={`translate(0, ${-scrollY})`}>
       {/* all-time win-rate curve (0..1 across the content width), drawn BEHIND
@@ -661,6 +666,26 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
           />
         ),
       )}
+
+      {/* Offseason card drop-shadows, drawn in their own pass AFTER the blocks
+          so each strip lands on top of the season content below it (blocks
+          paint offseason-before-season, so the season header would otherwise
+          occlude a shadow drawn inside the offseason block). Cheap gradient
+          strips — no SVG filter, no per-frame rasterization. */}
+      {offMode !== "hidden" &&
+        visible
+          .filter((b) => b.type === "offseason")
+          .map((b) => (
+            <rect
+              key={`osh-${b.year}`}
+              x={0}
+              y={b.y1}
+              width={width}
+              height={6}
+              fill="url(#offPaperShadow)"
+              style={{ pointerEvents: "none" }}
+            />
+          ))}
 
       {/* year labels only at the most-zoomed-out bands; otherwise the banner
           above each season carries the (much bigger) year */}

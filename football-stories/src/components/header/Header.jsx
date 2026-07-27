@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, useAnimation } from "framer-motion";
 import TeamTab from "./TeamTab";
 import TeamSelect from "./TeamSelect";
@@ -49,9 +49,15 @@ export default function Header({
   const [teamSelectOpen, setTeamSelectOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [lastY, setLastY] = useState(0);
-  const [accumulatedDown, setAccumulatedDown] = useState(0);
-  const [visible, setVisible] = useState(true);
+  // Scroll bookkeeping for the hide-on-scroll-down / show-on-scroll-up header.
+  // None of these feed render — the visible hide/show is animated by
+  // framer-motion `controls` — so they live in refs. That keeps the scroll
+  // handler entirely off React's render path: no setState per scroll frame and
+  // no listener re-subscription (the effect binds once), which matters on iOS
+  // where this fires alongside the timeline's own scroll handler.
+  const lastYRef = useRef(0);
+  const accumulatedDownRef = useRef(0);
+  const visibleRef = useRef(true);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -59,39 +65,36 @@ export default function Header({
 
     const onScroll = () => {
       const y = el.scrollTop;
-      const delta = y - lastY;
+      const delta = y - lastYRef.current;
 
       if (delta > 0) {
-        const nextAccum = accumulatedDown + delta;
-        if (visible && nextAccum > HIDE_THRESHOLD) {
-          setVisible(false);
+        accumulatedDownRef.current += delta;
+        if (visibleRef.current && accumulatedDownRef.current > HIDE_THRESHOLD) {
+          visibleRef.current = false;
           controls.start({
             height: 0,
             y: -HEADER_H,
-            transition: { duration: 0.25 }
+            transition: { duration: 0.25 },
           });
         }
-        setAccumulatedDown(nextAccum);
-      }
-
-      if (delta < 0) {
-        if (!visible) {
-          setVisible(true);
+      } else if (delta < 0) {
+        if (!visibleRef.current) {
+          visibleRef.current = true;
           controls.start({
             height: HEADER_H,
             y: 0,
-            transition: { duration: 0.25 }
+            transition: { duration: 0.25 },
           });
         }
-        setAccumulatedDown(0);
+        accumulatedDownRef.current = 0;
       }
 
-      setLastY(y);
+      lastYRef.current = y;
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollRef, lastY, accumulatedDown, visible, controls]);
+  }, [scrollRef, controls]);
 
   // close the menu on Escape
   useEffect(() => {

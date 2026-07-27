@@ -37,6 +37,29 @@ export function tierColor(tier) {
   return TIER_COLORS[tier] || NO_VALUE_COLOR;
 }
 
+// Resolve the active grade for a pick's `value`, honoring the
+// availability-adjusted lens. When `adjusted` is true and the adjusted fields
+// are present, return them; otherwise fall back to the realized-value grade.
+// (The adjusted score prorates the slot's expectation toward games actually
+// played, so a productive-but-short career isn't graded as a bust.)
+export function gradeOf(value, adjusted = false) {
+  if (!value) return { score: null, tier: null, percentile: null, provisional: false };
+  if (adjusted && typeof value.score_adj === "number") {
+    return {
+      score: value.score_adj,
+      tier: value.tier_adj,
+      percentile: value.percentile_adj,
+      provisional: !!value.provisional,
+    };
+  }
+  return {
+    score: typeof value.score === "number" ? value.score : null,
+    tier: value.tier ?? null,
+    percentile: value.percentile ?? null,
+    provisional: !!value.provisional,
+  };
+}
+
 // WCAG-aware foreground for a tier chip. The ramp runs from dark green through
 // pale yellow (C = #fee08b) to orange/red, so white text fails badly on the
 // light middle tiers. Pick near-black or white by whichever has the higher
@@ -101,15 +124,17 @@ export function measureDraft({ year, mode, data }) {
   return HEADER_H + picks.length * PICK_ROW_H + BOTTOM_PAD;
 }
 
-// Aggregate readout for the class header.
-export function classSummary(picks) {
+// Aggregate readout for the class header. Lens-aware: with `adjusted` the
+// avg/hits/busts reflect the availability-adjusted per-pick grades.
+export function classSummary(picks, adjusted = false) {
   const list = picks || [];
-  const scored = list.filter((p) => p.value && typeof p.value.score === "number");
+  const g = (p) => gradeOf(p.value, adjusted);
+  const scored = list.filter((p) => typeof g(p).score === "number");
   const avgScore = scored.length
-    ? scored.reduce((a, p) => a + p.value.score, 0) / scored.length
+    ? scored.reduce((a, p) => a + g(p).score, 0) / scored.length
     : null;
-  const hits = list.filter((p) => p.value && ["S", "A+", "A", "B"].includes(p.value.tier)).length;
-  const busts = list.filter((p) => p.value && ["D", "F"].includes(p.value.tier)).length;
+  const hits = list.filter((p) => ["S", "A+", "A", "B"].includes(g(p).tier)).length;
+  const busts = list.filter((p) => ["D", "F"].includes(g(p).tier)).length;
   return {
     count: list.length,
     scored: scored.length,

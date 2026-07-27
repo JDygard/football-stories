@@ -19,6 +19,7 @@ import {
   isExpandedYear,
   classGradeFor,
   classSummary,
+  gradeOf,
   pickLabel,
   truncate,
   measureDraft,
@@ -37,8 +38,8 @@ function fmtScore(v) {
   return v == null ? "—" : Math.round(v);
 }
 
-function Header({ x, width, y, picks, grade }) {
-  const s = classSummary(picks);
+function Header({ x, width, y, picks, grade, adjusted }) {
+  const s = classSummary(picks, adjusted);
   const right =
     s.scored > 0
       ? `${s.count} picks · ${s.hits} hit${s.hits === 1 ? "" : "s"} · avg ${fmtScore(s.avgScore)}`
@@ -94,7 +95,7 @@ function Header({ x, width, y, picks, grade }) {
   );
 }
 
-function PickRow({ p, x, width, y, onSelect }) {
+function PickRow({ p, x, width, y, onSelect, adjusted }) {
   const labelX = x + 6;
   const nameX = x + 54;
   const right = x + width;
@@ -103,9 +104,10 @@ function PickRow({ p, x, width, y, onSelect }) {
   const scoreBarW = 34;
   const scoreBarX = chipX - 8 - scoreBarW;
 
-  const score = p.value && typeof p.value.score === "number" ? p.value.score : null;
-  const tier = p.value ? p.value.tier : null;
-  const star = p.value && p.value.provisional ? "*" : "";
+  const g = gradeOf(p.value, adjusted);
+  const score = g.score;
+  const tier = g.tier;
+  const star = g.provisional ? "*" : "";
   const color = tierColor(tier);
 
   const nameMax = Math.max(4, Math.floor((scoreBarX - nameX - 6) / 6));
@@ -158,7 +160,7 @@ function PickRow({ p, x, width, y, onSelect }) {
 }
 
 // Compact: header + a single row of tier-colored squares (one per pick).
-function CompactChips({ picks, x, width, y }) {
+function CompactChips({ picks, x, width, y, adjusted }) {
   const n = picks.length;
   if (!n) return null;
   const avail = width - 8;
@@ -174,7 +176,7 @@ function CompactChips({ picks, x, width, y }) {
           width={sq}
           height={Math.min(COMPACT_H - 4, sq)}
           rx={1}
-          fill={tierColor(p.value ? p.value.tier : null)}
+          fill={tierColor(gradeOf(p.value, adjusted).tier)}
         />
       ))}
     </g>
@@ -188,6 +190,7 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
   const expanded = mode !== "compact" || isExpandedYear(data, year);
   const canToggle = mode === "compact" && typeof data.onToggleYear === "function";
   const grade = classGradeFor(data, year);
+  const adjusted = !!data.adjusted;
 
   const guarded = (fn) => (e) => {
     e.stopPropagation();
@@ -208,12 +211,12 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
         onClick={canToggle ? guarded(() => data.onToggleYear(year)) : undefined}
         style={canToggle ? { cursor: "pointer" } : undefined}
       />
-      <Header x={x} width={width} y={y} picks={picks} grade={grade} />
+      <Header x={x} width={width} y={y} picks={picks} grade={grade} adjusted={adjusted} />
       {/* Keyed by mode so the fade replays when the class actually toggles
           between compact chips and full rows, not on every scroll frame. */}
       {!expanded ? (
         <g key="chips" className="draft-reveal">
-          <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} />
+          <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} adjusted={adjusted} />
         </g>
       ) : (
         <g key="rows" className="draft-reveal">
@@ -224,6 +227,7 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
               x={x}
               width={width}
               y={y + HEADER_H + i * PICK_ROW_H}
+              adjusted={adjusted}
               onSelect={
                 typeof data.onSelectPick === "function"
                   ? guarded(() => data.onSelectPick(p))

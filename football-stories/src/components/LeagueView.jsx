@@ -109,8 +109,10 @@ export default function LeagueView({ onClose, onGoTo }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "min(580px, 94vw)",
-          maxHeight: "84vh",
+          // % of the device frame, not vw/vh — the frame is the containing
+          // block for this fixed overlay (see .app-frame in index.css).
+          width: "min(580px, 94%)",
+          maxHeight: "84%",
           display: "flex",
           flexDirection: "column",
           background: "#fff",

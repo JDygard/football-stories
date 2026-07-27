@@ -59,8 +59,9 @@ export default function MethodologyView({ onClose }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "min(560px, 94vw)",
-          maxHeight: "84vh",
+          // % of the device frame, not vw/vh — see .app-frame in index.css.
+          width: "min(560px, 94%)",
+          maxHeight: "84%",
           overflowY: "auto",
           background: "#fff",
           borderRadius: 10,

@@ -62,6 +62,9 @@ const Main = forwardRef(function Main(
   // Optional-display toggles from the Settings drawer. Absent key => on.
   const showWinRate = settings?.showWinRate !== false;
   const showPlayoffs = settings?.showPlayoffs !== false;
+  // Draft-grade lens: standard "value delivered" by default; opt-in to the
+  // availability-adjusted grade (absent/false => standard).
+  const adjustedGrades = settings?.availabilityAdjusted === true;
 
   // ---- interaction state ----
   // Draft classes expanded to full rows while in compact (Zoom 2) mode.
@@ -95,8 +98,9 @@ const Main = forwardRef(function Main(
         onToggleDraftYear,
         onSelectPick,
         tapGuard,
+        adjusted: adjustedGrades,
       }),
-    [draftSegment, expandedDraftYears, onToggleDraftYear, onSelectPick, tapGuard],
+    [draftSegment, expandedDraftYears, onToggleDraftYear, onSelectPick, tapGuard, adjustedGrades],
   );
 
   // ---- ribbon spans: staff (role-filtered) + selected player tenures ----
@@ -256,7 +260,7 @@ const Main = forwardRef(function Main(
           )}
         </div>
       </div>
-      <InfoCard selection={selected} adminById={adminById} onClose={closeCard} />
+      <InfoCard selection={selected} adminById={adminById} onClose={closeCard} adjusted={adjustedGrades} />
       <ZoomHud band={band} />
     </div>
   );

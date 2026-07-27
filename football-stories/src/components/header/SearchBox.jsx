@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSearchIndex from "../../hooks/useSearchIndex.js";
+import { frameRect } from "../../utils/frameRect.js";
 import { roleColor, positionGroup } from "../visualization/staffRibbonModel.js";
 import { teamName } from "../visualization/teamMeta.js";
 
@@ -144,9 +145,12 @@ export default function SearchBox({ onSelect }) {
         <div
           style={{
             position: "fixed",
-            top: rect.bottom + 4,
-            right: Math.max(8, Math.round(window.innerWidth - rect.right)),
-            width: 320,
+            // `fixed` here resolves against the device frame, not the viewport
+            // (see .app-frame in index.css), so the measured input rect —
+            // viewport coordinates — is rebased onto the frame's origin.
+            top: rect.bottom - frameRect().top + 4,
+            right: Math.max(8, Math.round(frameRect().right - rect.right)),
+            width: "min(320px, calc(100% - 16px))",
             maxHeight: 360,
             overflowY: "auto",
             zIndex: 50,

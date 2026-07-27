@@ -8,6 +8,7 @@ import LeagueView from './components/LeagueView.jsx'
 import MethodologyView from './components/MethodologyView.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import useTeamData from './hooks/useTeamData'
+import { FRAME_ID } from './utils/frameRect'
 
 const DEFAULT_RIBBONS = {
   roles: { coach: true, gm: true, owner: true, unknown: true },
@@ -120,7 +121,12 @@ function App() {
     };
   }, [pendingFollow, mapped, selectedTeam]);
 
-  if (loading || !mapped) return <div>Loading…</div>;
+  if (loading || !mapped)
+    return (
+      <div className="app-frame" id={FRAME_ID} style={{ display: 'grid', placeItems: 'center' }}>
+        Loading…
+      </div>
+    );
 
   // Only hand the focus target to the timeline once the CORRECT team's data
   // is mounted — otherwise the old team's layout would consume it.
@@ -133,9 +139,15 @@ function App() {
           (latest season) is parked behind the bar and can't be scrolled into
           view. dvh keeps this aligned with the visual viewport on iOS, where
           the fixed bar sits at the dynamic-viewport bottom, not the 100vh one. */}
+      {/* Portrait device frame. On phones it's a transparent full-bleed
+          wrapper; on wider viewports index.css letterboxes it into a centred
+          phone-shaped window. It is also the containing block for every
+          `position: fixed` overlay in the app (see .app-frame in index.css) —
+          don't remove its transform. */}
+      <div className="app-frame" id={FRAME_ID}>
       <div style={{
-        maxHeight: '100dvh',
-        height: '100dvh',
+        maxHeight: '100%',
+        height: '100%',
         boxSizing: 'border-box',
         paddingBottom: BAR_H,
         overflow: 'hidden',
@@ -150,7 +162,7 @@ function App() {
           onOpenMethodology={() => setMethodologyOpen(true)}
           onSearchSelect={goTo}
         />
-        <div style={{ width: '100vw', flex: 1, height: '100%' }}>
+        <div style={{ width: '100%', flex: 1, height: '100%' }}>
           <Main
             ref={mainRef}
             mapped={mapped}
@@ -178,6 +190,12 @@ function App() {
           <MethodologyView onClose={() => setMethodologyOpen(false)} />
         )}
       </div>
+      </div>
+      {/* Desktop-only affordance note (hidden under 560px by index.css): the
+          app's zoom is a pinch gesture on touch, ctrl/⌘-wheel with a mouse. */}
+      <p className="frame-hint">
+        Built for mobile — hold <kbd>Ctrl</kbd> (or <kbd>⌘</kbd>) and scroll to zoom.
+      </p>
     </ErrorBoundary>
   )
 }
