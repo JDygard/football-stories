@@ -159,13 +159,52 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
   );
 }
 
-// Compact: header + a single row of tier-colored squares (one per pick).
+// The Zoom-3 season-page header variant: "Grade [D]" + the class summary,
+// over a hairline (the "DRAFT CLASS" section label itself is drawn by the
+// page renderer — this row is the class readout under it).
+function PageHeader({ x, width, y, picks, grade, adjusted }) {
+  const s = classSummary(picks, adjusted);
+  const right =
+    s.scored > 0
+      ? `${s.count} picks · ${s.hits} hit${s.hits === 1 ? "" : "s"} · avg ${fmtScore(s.avgScore)}`
+      : `${s.count} pick${s.count === 1 ? "" : "s"}`;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <text x={x + 4} y={y + HEADER_H - 5} fontSize={11} fontWeight={700} fill="#1d2534">
+        Grade
+      </text>
+      {grade && (
+        <g>
+          <rect x={x + 44} y={y + 1} width={24} height={HEADER_H - 4} rx={4} fill={tierColor(grade.tier)} />
+          <text
+            x={x + 56}
+            y={y + HEADER_H / 2}
+            fontSize={9}
+            fontWeight={700}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill={tierTextColor(grade.tier)}
+          >
+            {grade.tier}
+            {grade.provisional ? "*" : ""}
+          </text>
+        </g>
+      )}
+      <text x={x + width - 4} y={y + HEADER_H - 5} fontSize={10} textAnchor="end" fill="#8a8f98">
+        {right}
+      </text>
+    </g>
+  );
+}
+
+// Compact (Zoom 2 "Seasons" card): a bare strip of tier-colored chips — the
+// grade/summary live in the card header, so no module header here.
 function CompactChips({ picks, x, width, y, adjusted }) {
   const n = picks.length;
   if (!n) return null;
   const avail = width - 8;
   const gap = 2;
-  const sq = Math.max(4, Math.min(12, avail / n - gap));
+  const sq = Math.max(4, Math.min(16, avail / n - gap));
   return (
     <g transform={`translate(${x + 4}, ${y + 2})`} style={{ pointerEvents: "none" }}>
       {picks.map((p, i) => (
@@ -175,22 +214,30 @@ function CompactChips({ picks, x, width, y, adjusted }) {
           y={0}
           width={sq}
           height={Math.min(COMPACT_H - 4, sq)}
-          rx={1}
+          rx={2}
           fill={tierColor(gradeOf(p.value, adjusted).tier)}
+          stroke="rgba(0,0,0,0.18)"
+          strokeWidth={0.75}
         />
       ))}
     </g>
   );
 }
 
-function renderDraft({ year, x, width, y, height, mode, data }) {
+function renderDraft({ year, x, width, y, height, mode, detailBand, data }) {
   const picks = picksForYear(data, year);
   if (!picks.length) return null;
 
-  const expanded = mode !== "compact" || isExpandedYear(data, year);
-  const canToggle = mode === "compact" && typeof data.onToggleYear === "function";
+  const compact = mode === "compact";
+  const expanded = !compact || isExpandedYear(data, year);
+  const canToggle = compact && typeof data.onToggleYear === "function";
   const grade = classGradeFor(data, year);
   const adjusted = !!data.adjusted;
+  // Only Zoom 4 keeps the tinted class box; the Seasons card and the season
+  // pages render the class on the plain card surface (per the mockups).
+  const tinted = detailBand === "GAME_DETAIL";
+  // Compact draws no module header; rows start at the top of the box.
+  const rowsTop = compact ? y : y + HEADER_H;
 
   const guarded = (fn) => (e) => {
     e.stopPropagation();
@@ -205,18 +252,23 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
         y={y}
         width={width}
         height={height}
-        fill={grade ? tierTint(grade.tier, 0.1) : "rgba(120,140,170,0.05)"}
-        stroke={grade ? tierTint(grade.tier, 0.4) : "rgba(120,140,170,0.18)"}
-        strokeWidth={1}
+        fill={tinted ? (grade ? tierTint(grade.tier, 0.1) : "rgba(120,140,170,0.05)") : "transparent"}
+        stroke={tinted ? (grade ? tierTint(grade.tier, 0.4) : "rgba(120,140,170,0.18)") : "none"}
+        strokeWidth={tinted ? 1 : 0}
         onClick={canToggle ? guarded(() => data.onToggleYear(year)) : undefined}
         style={canToggle ? { cursor: "pointer" } : undefined}
       />
-      <Header x={x} width={width} y={y} picks={picks} grade={grade} adjusted={adjusted} />
+      {!compact &&
+        (detailBand === "GAME_BANDS" ? (
+          <PageHeader x={x} width={width} y={y} picks={picks} grade={grade} adjusted={adjusted} />
+        ) : (
+          <Header x={x} width={width} y={y} picks={picks} grade={grade} adjusted={adjusted} />
+        ))}
       {/* Keyed by mode so the fade replays when the class actually toggles
           between compact chips and full rows, not on every scroll frame. */}
       {!expanded ? (
         <g key="chips" className="draft-reveal">
-          <CompactChips picks={picks} x={x} width={width} y={y + HEADER_H} adjusted={adjusted} />
+          <CompactChips picks={picks} x={x} width={width} y={y} adjusted={adjusted} />
         </g>
       ) : (
         <g key="rows" className="draft-reveal">
@@ -226,7 +278,7 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
               p={p}
               x={x}
               width={width}
-              y={y + HEADER_H + i * PICK_ROW_H}
+              y={rowsTop + i * PICK_ROW_H}
               adjusted={adjusted}
               onSelect={
                 typeof data.onSelectPick === "function"

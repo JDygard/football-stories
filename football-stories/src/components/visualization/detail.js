@@ -19,17 +19,27 @@ export const DETAIL_BANDS = [
 
 // Per-band geometry consumed by buildTimelineLayout.
 //   season.mode: "rows"  -> one row per game, height = games * gameRowHeight
+//                "page"  -> the season is one full-viewport "story page"
+//                           (record + W/L chips + draft class + playoffs
+//                           sections; see the page branch in the builder)
 //                "line"  -> single collapsed band of fixed `height`
 //   offseason:   "full" | "compact" | "hidden"  (how modules render / whether they do)
 export const DETAIL_GEOMETRY = {
   GAME_DETAIL: { season: { mode: "rows", gameRowHeight: 18 }, offseason: "full" },
-  GAME_BANDS: { season: { mode: "rows", gameRowHeight: 9 }, offseason: "full" },
-  SEASON_LINES: { season: { mode: "line", height: 26 }, offseason: "compact" },
+  GAME_BANDS: { season: { mode: "page" }, offseason: "full" },
+  SEASON_LINES: { season: { mode: "line", height: 4 }, offseason: "compact" },
   ERA_SUMMARY: { season: { mode: "line", height: 12 }, offseason: "hidden" },
   FRANCHISE_OVERVIEW: { season: { mode: "line", height: 5 }, offseason: "hidden" },
 };
 
 export const DEFAULT_BAND = "GAME_DETAIL";
+
+// Bands the MOBILE (portrait) zoom ladder actually stops at. The glossary puts
+// both coarse bands on rung 1, so exposing them as two separate stops gave the
+// phone two consecutive "Eras" levels; mobile stops at ERA_SUMMARY instead.
+// FRANCHISE_OVERVIEW stays in DETAIL_BANDS because the desktop tree, with far
+// more horizontal room, still uses it as its own rung.
+export const MOBILE_BANDS = DETAIL_BANDS.filter((b) => b !== "FRANCHISE_OVERVIEW");
 
 // Total user-facing zoom rungs (1 = most years on screen … 4 = every game).
 export const ZOOM_LEVELS = 4;
@@ -39,11 +49,11 @@ export const ZOOM_LEVELS = 4;
 // name. Consumed by the zoom HUD so the on-screen label always matches the
 // band that actually rendered (post-hysteresis).
 export const ZOOM_LABELS = {
-  GAME_DETAIL: { zoom: 4, name: "Every game" },
-  GAME_BANDS: { zoom: 3, name: "Game by game" },
-  SEASON_LINES: { zoom: 2, name: "Season by season" },
+  GAME_DETAIL: { zoom: 4, name: "Every Game" },
+  GAME_BANDS: { zoom: 3, name: "Season by season" },
+  SEASON_LINES: { zoom: 2, name: "Seasons" },
   ERA_SUMMARY: { zoom: 1, name: "Eras" },
-  FRANCHISE_OVERVIEW: { zoom: 1, name: "Franchise" },
+  FRANCHISE_OVERVIEW: { zoom: 1, name: "Eras" },
 };
 
 export const zoomLabelFor = (band) => ZOOM_LABELS[band] || ZOOM_LABELS[DEFAULT_BAND];

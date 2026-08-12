@@ -12,8 +12,16 @@
 
 import { memo, useMemo } from "react";
 import { geometryFor } from "./detail.js";
-import { buildStaffRibbons, PEEK } from "./staffRibbonModel.js";
+import { buildStaffRibbons, resolveRibbonStrips, PEEK } from "./staffRibbonModel.js";
 import StaffRibbonLayer from "./StaffRibbonLayer.jsx";
+import SeasonPage from "./SeasonPage.jsx";
+import {
+  classGradeFor,
+  classSummary,
+  picksForYear,
+  tierColor,
+  tierTextColor,
+} from "./offseason/draftModel.js";
 
 const WIN = "#2e9d51"; // victory green — winner
 const LOSS = "#d0423f"; // loss red — loser (vivid but not neon)
@@ -32,7 +40,22 @@ const OFF_PAPER = "#fbfbfa";        // paper surface — near-white, neutral
 const OFF_HAIR = "#ececec";         // soft divider hairline on paper
 const OFF_YEAR = "#2e3338";         // year — cool near-black, minimalist
 const SEASON_HEADER_BG = "#f4f4f3"; // faint strip behind the record header
-const CURVE = "#4a6fa5";            // win-rate line (matches the polyline)
+const CURVE = "#3f5d9e";            // win-rate line + pill (navy, mockup palette)
+
+// Zoom 2 "Seasons" card list: a far-left timeline stripe with per-year
+// indicator dots, and one rounded card per season.
+const STRIPE_X = 18; // timeline stripe center
+const CARD_L = 32; // card left edge (content insets from here)
+const CARD_PAD = 12; // horizontal padding inside a card
+const CARD_STROKE = "#e3e1db";
+const CARD_SELECTED = "#2d6cdf"; // expanded card border + dot accent
+const DOT_GREY = "#b7bdc7";
+// Year row geometry, shared by the card header (which draws the year) and the
+// stripe pass (which draws the dot + leader line) so the two can't drift apart.
+// Both are offsets from the offseason block's headerY.
+const CARD_YEAR_Y = 30; // year text BASELINE
+const CARD_DOT_Y = CARD_YEAR_Y - 6; // dot centre, optically level with the digits
+const CARD_PCT_Y = CARD_YEAR_Y + 19; // all-time win% line under the year
 
 // Playoff finish -> outline color at Zoom 1/2 (line modes). Tune freely.
 // NOTE: user spec'd gold/silver(conf)/bronze(div)/black(WC); "Lost SB" was
@@ -53,10 +76,11 @@ function playoffMedal(playoffs) {
   return null;
 }
 
-// The season header: a faint strip at the top of the season block, under the
-// offseason paper and directly above the games, laying out the year's record
-// and — except at zoom 4 — the all-time overall winrate as a tight pill.
-function SeasonHeader({ block, contentLeft, contentRight, meta, showPlayoffs = true }) {
+// The season header: at zoom 4 a faint strip at the top of the season block,
+// under the offseason paper and directly above the games; in the zoom-2
+// Seasons card (`card`) the same facts as a plain "Record …" line on the card
+// surface (no strip, no hairline — mockup style).
+function SeasonHeader({ block, contentLeft, contentRight, meta, showPlayoffs = true, card = false }) {
   const h = block.seasonHeaderHeight || 0;
   if (h <= 0 || !meta) return null;
   const y0 = block.y0;
@@ -75,6 +99,24 @@ function SeasonHeader({ block, contentLeft, contentRight, meta, showPlayoffs = t
         ? "#c0492b"
         : "#8a857c"
     : null;
+
+  if (card) {
+    return (
+      <text
+        x={contentLeft}
+        y={cy}
+        dominantBaseline="central"
+        fontSize={11.5}
+        fill="#1d2534"
+        style={{ pointerEvents: "none", letterSpacing: 0.1 }}
+      >
+        <tspan fontWeight={700}>Record</tspan>
+        <tspan fontWeight={700}>{`  ${recordStr(meta, showPlayoffs)}`}</tspan>
+        {df && <tspan fill={dfColor} fontWeight={600}>{`  ·  ${df.text}`}</tspan>}
+        {pdStr && <tspan fill={pdColor} fontWeight={700}>{`  ·  ${pdStr}`}</tspan>}
+      </text>
+    );
+  }
 
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -209,7 +251,7 @@ const PostseasonSection = memo(function PostseasonSection({ post, contentLeft, c
   );
 });
 
-const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight, centerX, cw, labelInline, meta, showPlayoffs = true }) {
+const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight, centerX, cw, labelInline, meta, showPlayoffs = true, card = false }) {
   const sm = block.season || {};
   const raw = sm.season || {};
   const header = (
@@ -219,6 +261,7 @@ const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight
       contentRight={contentRight}
       meta={meta}
       showPlayoffs={showPlayoffs}
+      card={card}
     />
   );
 
@@ -259,7 +302,9 @@ const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight
   return (
     <g>
       {header}
-      {medal && (
+      {/* The W-L differential bar + medal frame belong to the zoom-1 era
+          lines; the zoom-2 Seasons card carries the record as text instead. */}
+      {!card && medal && (
         <rect
           x={contentLeft}
           y={y - frameH / 2}
@@ -271,7 +316,7 @@ const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight
           rx={2}
         />
       )}
-      <rect x={x0} y={y - 3} width={barW} height={6} fill={color} rx={1} />
+      {!card && <rect x={x0} y={y - 3} width={barW} height={6} fill={color} rx={1} />}
       {/* The record lives in the year banner above the season; only show it
           inline at the most-zoomed-out bands where no banner is drawn. */}
       {labelInline && (
@@ -320,7 +365,84 @@ const OffseasonBlock = memo(function OffseasonBlock({
   meta,
   showWinRate = true,
 }) {
-  const showBanner = offMode !== "hidden"; // zoom 2 (compact) + zoom 3/4 (full)
+  // ---- Zoom 2 "Seasons" card header ----
+  // The card (drawn by the layer's card pass) is the surface; this header is
+  // year + grade chip on the first row, all-time win% left / picks summary
+  // right on the second. No paper, no curve pill — mockup style.
+  if (offMode === "compact") {
+    const grade = classGradeFor(moduleData, block.year);
+    const picks = picksForYear(moduleData, block.year);
+    const s = picks.length ? classSummary(picks, !!moduleData.adjusted) : null;
+    const summary = s
+      ? s.scored > 0
+        ? `${s.count} picks · ${s.hits} hit${s.hits === 1 ? "" : "s"} · avg ${
+            s.avgScore == null ? "—" : Math.round(s.avgScore)
+          }`
+        : `${s.count} pick${s.count === 1 ? "" : "s"}`
+      : null;
+    const y0 = block.headerY ?? block.y0;
+    const yearY = y0 + CARD_YEAR_Y; // breathing room under the card's top edge
+    const pctY = y0 + CARD_PCT_Y;
+    return (
+      <g>
+        <g style={{ pointerEvents: "none" }}>
+          <text
+            x={contentLeft}
+            y={yearY}
+            fontSize={17}
+            fontWeight={600}
+            fill={OFF_YEAR}
+            style={{ letterSpacing: -0.2 }}
+          >
+            {block.year}
+          </text>
+          {grade && (
+            <g>
+              <rect x={contentLeft + 46} y={yearY - 14} width={22} height={16} rx={4} fill={tierColor(grade.tier)} />
+              <text
+                x={contentLeft + 57}
+                y={yearY - 6}
+                fontSize={9.5}
+                fontWeight={700}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill={tierTextColor(grade.tier)}
+              >
+                {grade.tier}
+                {grade.provisional ? "*" : ""}
+              </text>
+            </g>
+          )}
+          {showWinRate && meta && meta.enterPct != null && (
+            <text x={contentLeft} y={pctY} fontSize={12.5} fontWeight={400} fill="#22304a">
+              {`${Math.round(meta.enterPct * 100)}% (${meta.enterWins}–${meta.enterLosses})`}
+            </text>
+          )}
+          {summary && (
+            <text x={contentRight} y={pctY} fontSize={10} textAnchor="end" fill="#8a8f98">
+              {summary}
+            </text>
+          )}
+        </g>
+        {block.modules.map((box) => (
+          <g key={`${block.year}-${box.id}`}>
+            {box.module.render({
+              year: block.year,
+              x: contentLeft,
+              width: cw,
+              y: box.y,
+              height: box.height,
+              mode: offMode,
+              detailBand,
+              data: moduleData,
+            })}
+          </g>
+        ))}
+      </g>
+    );
+  }
+
+  const showBanner = offMode !== "hidden"; // zoom 4 (full) banner
   if ((!block.modules || !block.modules.length) && !showBanner) return null;
 
   const headerH = block.headerHeight || 0;
@@ -341,7 +463,7 @@ const OffseasonBlock = memo(function OffseasonBlock({
   if (showWinRate && headerH > 0 && detailBand !== "GAME_DETAIL" && meta && meta.enterPct != null) {
     const fs = big ? 11 : 10;
     const pct = Math.round(meta.enterPct * 100);
-    const label = `${pct}% (${meta.enterWins}/${meta.enterLosses})`;
+    const label = `${pct}% (${meta.enterWins}–${meta.enterLosses})`;
     const ph = Math.min(headerH - 8, 18);
     const caretW = fs * 0.62;
     const gap = 4;
@@ -564,23 +686,53 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
   // Tails sit just inside the right screen edge (inset by PEEK so exit bands
   // leave a 3px leaving-stub); exit bands still run off-screen from there.
   const railLeft = width - railWidth - PEEK;
-  const contentLeft = MARGIN.left;
-  const contentRight = railWidth
+  // Band-specific content edges: the Seasons card list (zoom 2) insets from
+  // the timeline stripe + card padding, the season pages (zoom 3) use slim
+  // page margins, everything else keeps the classic margins.
+  const isCards = band === "SEASON_LINES";
+  const isPages = band === "GAME_BANDS";
+  const baseRight = railWidth
     ? railLeft - RAIL_PAD
-    : width - MARGIN.right;
+    : width - (isPages ? 14 : isCards ? 20 : MARGIN.right);
+  const cardRight = baseRight; // card rect right edge (zoom 2)
+  const contentLeft = isCards ? CARD_L + CARD_PAD : isPages ? 14 : MARGIN.left;
+  const contentRight = isCards ? cardRight - CARD_PAD : baseRight;
   const cw = Math.max(0, contentRight - contentLeft);
   const centerX = (contentLeft + contentRight) / 2;
 
-  // virtualize: only blocks intersecting [scrollY, scrollY+height] (+pad).
-  // Memoized so a scroll that doesn't change which blocks are visible keeps the
-  // same array identity — letting the memoized children skip re-rendering.
-  const vBot = scrollY + height + 60;
+  // Pinned personnel stack. The strips resolve to CONTENT coordinates with the
+  // stack hanging just above `scrollY`; the content group below is drawn at
+  // `+stackHeight - scrollY`, which parks the stack across the top of the
+  // canvas and starts the timeline underneath it. Nothing is ever covered.
+  const { strips: ribbonStrips, stackHeight } = useMemo(
+    () => resolveRibbonStrips({ ribbons: ribbonLayout.ribbons, scrollY }),
+    [ribbonLayout, scrollY],
+  );
+
+  // virtualize: only blocks intersecting the visible content window, which the
+  // stack shifts down by stackHeight (so the pad has to clear the tallest
+  // stack, not a fixed 60px).
+  const vPad = 60 + stackHeight;
+  const vBot = scrollY + height + vPad;
   const visible = useMemo(() => {
     if (!layout?.blocks) return [];
-    const top = scrollY - 60;
-    const bot = scrollY + height + 60;
+    const top = scrollY - vPad;
+    const bot = scrollY + height + vPad;
     return layout.blocks.filter((b) => b.y1 > top && b.y0 < bot);
-  }, [layout, scrollY, height]);
+  }, [layout, scrollY, height, vPad]);
+
+  // Years with any visible block — the per-year passes (zoom-2 cards, zoom-3
+  // pages) render once per year, not once per half-block.
+  const visibleYears = useMemo(() => {
+    const seen = new Set();
+    const years = [];
+    for (const b of visible) {
+      if (seen.has(b.year)) continue;
+      seen.add(b.year);
+      years.push(b.year);
+    }
+    return years;
+  }, [visible]);
 
   // The win-rate polyline spans the full timeline height (it's drawn behind the
   // virtualized blocks), so build its point string once per layout/geometry
@@ -610,7 +762,7 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         <stop offset="100%" stopColor="#3a2f1a" stopOpacity="0" />
       </linearGradient>
     </defs>
-    <g transform={`translate(0, ${-scrollY})`}>
+    <g transform={`translate(0, ${stackHeight - scrollY})`}>
       {/* all-time win-rate curve (0..1 across the content width), drawn BEHIND
           the blocks so each opaque offseason banner — and the franchise-record
           pill that rides on it — cleanly occludes the line where it passes
@@ -637,42 +789,136 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         </g>
       )}
 
-      {visible.map((b) =>
-        b.type === "season" ? (
-          <SeasonBlock
-            key={`s-${b.year}`}
-            block={b}
-            contentLeft={contentLeft}
-            contentRight={contentRight}
-            centerX={centerX}
-            cw={cw}
-            labelInline={offMode === "hidden"}
-            meta={seasonMeta.get(b.year)}
-            showPlayoffs={showPlayoffs}
+      {/* Zoom-2 "Seasons": far-left timeline stripe + per-year indicator dot
+          + one rounded card per season. The card is the tap target — a tap
+          expands its draft class (when the module is enabled) and lights the
+          card + dot. Drawn before the blocks so content paints on top. */}
+      {isCards && layout.blocks.length > 0 && (
+        <g>
+          <line
+            x1={STRIPE_X}
+            x2={STRIPE_X}
+            y1={layout.blocks[0].y0 + 10}
+            y2={layout.blocks[layout.blocks.length - 1].y1 - 10}
+            stroke="#d9dde3"
+            strokeWidth={3}
+            strokeLinecap="round"
+            style={{ pointerEvents: "none" }}
           />
-        ) : (
-          <OffseasonBlock
-            key={`o-${b.year}`}
-            block={b}
-            contentLeft={contentLeft}
-            contentRight={contentRight}
-            cw={cw}
-            fullWidth={width}
-            offMode={offMode}
-            detailBand={band}
-            moduleData={moduleData}
-            meta={seasonMeta.get(b.year)}
-            showWinRate={showWinRate}
-          />
-        ),
+          {visibleYears.map((year) => {
+            const pair = layout.byYear.get(year);
+            if (!pair) return null;
+            const { offseason: off, season: sea } = pair;
+            const expanded = !!moduleData.expandedYears?.has(year);
+            const canToggle =
+              off.modules.length > 0 && typeof moduleData.onToggleYear === "function";
+            // Level with the year's digits (same base offset the card header
+            // uses), with a leader line running from the dot across the card
+            // edge to just left of the year.
+            const dotY = (off.headerY ?? off.y0) + CARD_DOT_Y;
+            const dotR = expanded ? 7 : 4;
+            return (
+              <g key={`card-${year}`}>
+                <rect
+                  x={CARD_L}
+                  y={off.y0 + 3}
+                  width={Math.max(0, cardRight - CARD_L)}
+                  height={sea.y1 - off.y0 - 6}
+                  rx={10}
+                  fill="#fff"
+                  stroke={expanded ? CARD_SELECTED : CARD_STROKE}
+                  strokeWidth={expanded ? 1.5 : 1}
+                  onClick={
+                    canToggle
+                      ? (e) => {
+                          e.stopPropagation();
+                          if (tapGuard && tapGuard()) return;
+                          moduleData.onToggleYear(year);
+                        }
+                      : undefined
+                  }
+                  style={canToggle ? { cursor: "pointer" } : undefined}
+                />
+                <line
+                  x1={STRIPE_X + dotR}
+                  x2={contentLeft - 5}
+                  y1={dotY}
+                  y2={dotY}
+                  stroke={expanded ? CARD_SELECTED : DOT_GREY}
+                  strokeWidth={expanded ? 1.5 : 1}
+                  style={{ pointerEvents: "none" }}
+                />
+                {expanded ? (
+                  <g style={{ pointerEvents: "none" }}>
+                    <circle cx={STRIPE_X} cy={dotY} r={dotR} fill="#fff" stroke={CARD_SELECTED} strokeWidth={2} />
+                    <circle cx={STRIPE_X} cy={dotY} r={3.5} fill={CARD_SELECTED} />
+                  </g>
+                ) : (
+                  <circle cx={STRIPE_X} cy={dotY} r={dotR} fill={DOT_GREY} style={{ pointerEvents: "none" }} />
+                )}
+              </g>
+            );
+          })}
+        </g>
       )}
 
-      {/* Offseason card drop-shadows, drawn in their own pass AFTER the blocks
-          so each strip lands on top of the season content below it (blocks
-          paint offseason-before-season, so the season header would otherwise
-          occlude a shadow drawn inside the offseason block). Cheap gradient
-          strips — no SVG filter, no per-frame rasterization. */}
-      {offMode !== "hidden" &&
+      {isPages
+        ? visibleYears.map((year) => {
+            const pair = layout.byYear.get(year);
+            if (!pair) return null;
+            return (
+              <SeasonPage
+                key={`p-${year}`}
+                offBlock={pair.offseason}
+                seaBlock={pair.season}
+                contentLeft={contentLeft}
+                contentRight={contentRight}
+                fullWidth={width}
+                meta={seasonMeta.get(year)}
+                moduleData={moduleData}
+                detailBand={band}
+                showWinRate={showWinRate}
+              />
+            );
+          })
+        : visible.map((b) =>
+            b.type === "season" ? (
+              <SeasonBlock
+                key={`s-${b.year}`}
+                block={b}
+                contentLeft={contentLeft}
+                contentRight={contentRight}
+                centerX={centerX}
+                cw={cw}
+                labelInline={offMode === "hidden"}
+                meta={seasonMeta.get(b.year)}
+                showPlayoffs={showPlayoffs}
+                card={offMode === "compact"}
+              />
+            ) : (
+              <OffseasonBlock
+                key={`o-${b.year}`}
+                block={b}
+                contentLeft={contentLeft}
+                contentRight={contentRight}
+                cw={cw}
+                fullWidth={width}
+                offMode={offMode}
+                detailBand={band}
+                moduleData={moduleData}
+                meta={seasonMeta.get(b.year)}
+                showWinRate={showWinRate}
+              />
+            ),
+          )}
+
+      {/* Offseason card drop-shadows (zoom-4 banners only: the zoom-3 pages
+          draw their own boundary seam and the zoom-2 cards have borders),
+          drawn in their own pass AFTER the blocks so each strip lands on top
+          of the season content below it. Cheap gradient strips — no SVG
+          filter, no per-frame rasterization. */}
+      {offMode === "full" &&
+        !isPages &&
         visible
           .filter((b) => b.type === "offseason")
           .map((b) => (
@@ -708,11 +954,11 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
       {/* personnel tenure ribbons (entry band + gutter tail + exit band) */}
       <StaffRibbonLayer
         ribbons={ribbonLayout.ribbons}
+        strips={ribbonStrips}
         width={width}
         slotCount={ribbonLayout.slotCount}
         tailWidth={ribbonLayout.tailW}
         railPan={railPan}
-        scrollY={scrollY}
         viewBottom={vBot}
         adminById={adminById}
         onSelect={onSelectStaff}

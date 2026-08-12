@@ -1,0 +1,33 @@
+/* --- Desktop (landscape) frame ---------------------------------------------
+   The wide-viewport sibling of .app-frame (index.css). Instead of letterboxing
+   the mobile UI into a phone-shaped window, the frame IS the whole window: the
+   horizontal timeline gets every pixel.
+
+   LOAD-BEARING, same as mobile: `transform: translateZ(0)` makes
+   .desktop-frame the containing block for `position: fixed` descendants
+   (Footer + drawers, TeamSelect, LeagueView / MethodologyView modals, ZoomHud,
+   header menu, search panel), and `overflow: hidden` clips them to it. Since
+   the frame spans the full window here, fixed overlays land where they would
+   anyway — the transform exists so the SAME chrome components work unchanged
+   in both frames (utils/frameRect.js measures whichever frame is mounted).
+   The consequences for new code still apply: size fixed/overlay content in %,
+   never vw/vh, and rebase measured rects via frameRect(). */
+.desktop-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  transform: translateZ(0);
+}
+
+/* When the desktop tree is mounted (main.jsx sets body[data-view]), undo the
+   letterbox styling index.css applies to wide viewports: no dark backdrop, no
+   centering padding — the frame fills the window edge to edge. */
+body[data-view="desktop"] {
+  background: #fff;
+}
+body[data-view="desktop"] #root {
+  padding: 0;
+  gap: 0;
+}

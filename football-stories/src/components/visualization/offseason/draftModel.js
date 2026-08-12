@@ -17,7 +17,7 @@
 // --- geometry (measure and render must agree on these) ---
 export const HEADER_H = 18;
 export const PICK_ROW_H = 16;
-export const COMPACT_H = 16; // single chip row
+export const COMPACT_H = 20; // single chip row (Seasons-card chip strip)
 export const BOTTOM_PAD = 4;
 
 // Tier ramp: green (exceeded expectation) -> red (fell short). null = no value.
@@ -115,11 +115,17 @@ export function isExpandedYear(data, year) {
 
 // Module height for a given year + render mode. 0 => nothing to show, so the
 // offseason block stays at its minimum.
+//
+// Compact (Zoom 2 "Seasons" card): the class is a bare chip strip — the
+// grade / summary now live in the card header (see OffseasonBlock), so the
+// module renders no header of its own; expanding shows bare pick rows.
+// Full (Zoom 3 pages + Zoom 4): header + rows, unchanged.
 export function measureDraft({ year, mode, data }) {
   const picks = picksForYear(data, year);
   if (!picks.length) return 0;
-  if (mode === "compact" && !isExpandedYear(data, year)) {
-    return HEADER_H + COMPACT_H + BOTTOM_PAD;
+  if (mode === "compact") {
+    if (!isExpandedYear(data, year)) return COMPACT_H + BOTTOM_PAD;
+    return picks.length * PICK_ROW_H + BOTTOM_PAD;
   }
   return HEADER_H + picks.length * PICK_ROW_H + BOTTOM_PAD;
 }

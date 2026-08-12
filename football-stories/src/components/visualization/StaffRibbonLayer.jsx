@@ -15,7 +15,7 @@
 //   - TERMINAL ("Retired" / "Left NFL" / "Drafted"): the timeline ends here, so
 //     the ribbon terminates behind the pill. A lighter neutral, not tappable.
 
-import { STRIP_H, PEEK, resolveRibbonStrips } from "./staffRibbonModel.js";
+import { STRIP_H, PEEK } from "./staffRibbonModel.js";
 import { teamName } from "./teamMeta.js";
 
 const PX_PER_CHAR = 5.8; // rough advance for fontSize 10
@@ -127,22 +127,23 @@ function stripLabel(r, title, maxChars) {
   return short.slice(0, Math.max(1, maxChars - 1)) + "…";
 }
 
+// `strips` comes from resolveRibbonStrips, resolved by TeamTimelineLayer — it
+// needs the stack height for its own content transform, so the layer owns the
+// call and hands the placement down rather than both computing it.
 export default function StaffRibbonLayer({
   ribbons = [],
+  strips,
   width = 0,
   slotCount = 0,
   tailWidth = STRIP_H,
   railPan = 0,
-  scrollY = 0,
   viewBottom = Infinity,
   adminById,
   onSelect,
   onFollow,
   tapGuard,
 }) {
-  if (!ribbons.length || !width) return null;
-
-  const strips = resolveRibbonStrips({ ribbons, scrollY });
+  if (!ribbons.length || !width || !strips) return null;
 
   const expandT = Math.min(1, Math.abs(railPan) / EXPAND_FULL_AT);
   const tailW = tailWidth + (STRIP_H - tailWidth) * expandT;
@@ -253,8 +254,8 @@ export default function StaffRibbonLayer({
             <text
               x={6}
               y={stripY + STRIP_H / 2 + 0.5}
-              fontSize={10}
-              fontWeight={600}
+              fontSize={10.5}
+              fontWeight={700}
               dominantBaseline="middle"
               fill="#fff"
               style={{ pointerEvents: "none", userSelect: "none" }}

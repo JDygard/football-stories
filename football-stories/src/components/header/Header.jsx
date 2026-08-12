@@ -114,8 +114,8 @@ export default function Header({
         style={{
           width: "100%",
           overflow: "hidden",
-          borderBottom: "1px solid #ccc",
-          background: "#fff",
+          borderBottom: "1px solid #0a1626",
+          background: "#0f2036", // deep navy chrome (mockup palette)
           zIndex: 10,
           display: "flex",
           alignItems: "center",
@@ -135,7 +135,7 @@ export default function Header({
               fontSize: 18,
               cursor: "pointer",
               padding: "2px 8px 2px 0",
-              color: "#333",
+              color: "#fff",
               lineHeight: 1,
             }}
           >

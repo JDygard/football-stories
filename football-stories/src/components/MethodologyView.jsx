@@ -209,6 +209,15 @@ export default function MethodologyView({ onClose }) {
           · Expected return is fitted on history, so the very newest slots
           of expansion-era rounds carry wider uncertainty than round one.
         </P>
+
+        <H>Website analytics</H>
+        <P style={{ color: "#555" }}>
+          This website uses Umami Cloud to collect anonymous usage statistics,
+          such as visited pages, approximate location, browser type, operating
+          system and referring website. Umami does not use cookies and does not
+          track visitors across websites. The information is used to understand
+          website usage and improve the site.
+        </P>
       </div>
     </div>
   );

@@ -27,9 +27,9 @@
 import { allocateTailSlots } from "./allocateTailSlots.js";
 
 export const ROLE_COLORS = {
-  owner: "#1f77b4",
-  gm: "#ff7f0e",
-  coach: "#2ca02c",
+  owner: "#b03a3c", // deep red (mockup palette; was blue)
+  gm: "#e0862e", // warm orange
+  coach: "#2e8b45", // green
   // player ribbons color by position group
   qb: "#8e44ad",
   rb: "#0e8f76",
@@ -94,6 +94,26 @@ export function stripReserveByYear(staff, stripHeight = STRIP_H, gap = STRIP_GAP
     out[s.from] = (out[s.from] || 0) + stripHeight + gap;
   }
   return out;
+}
+
+// Tallest the pinned stack can ever get, in px: the most people in post at
+// once. The timeline is pushed down by the LIVE stack height (see
+// resolveRibbonStrips), so the scroll range needs this much extra slack at the
+// bottom or the final rows become unreachable.
+export function maxStackHeight(staff, stripHeight = STRIP_H, gap = STRIP_GAP) {
+  const edges = [];
+  for (const s of staff || []) {
+    if (s.from == null || s.to == null) continue;
+    edges.push([s.from, 1], [s.to + 1, -1]);
+  }
+  edges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let cur = 0;
+  let max = 0;
+  for (const [, d] of edges) {
+    cur += d;
+    if (cur > max) max = cur;
+  }
+  return max * (stripHeight + gap);
 }
 
 // staff: collapsed spans from the team segment:
@@ -184,10 +204,21 @@ export function buildStaffRibbons({
   }
 
   // ---- exit staggering ----
-  // Exits sharing a base row fan out downward (latest entrant stays highest,
-  // mirroring the original layout), the tail extending to reach its row.
-  // Then each group shifts down in STRIP_H steps until no exit sits on an
+  // Exits sharing a base row fan out UPWARD (latest entrant stays lowest, on
+  // the true end-of-tenure row), the tail stopping short to reach its row.
+  // Then each group shifts up in STRIP_H steps until no exit sits on an
   // entry-band row.
+  //
+  // Upward, not downward: a downward fan pushes tailEnd PAST the end of the
+  // tenure's last season and into the following year — where the next hire's
+  // entry band anchors. The tail-slot allocator then sees the departed person
+  // as still occupying a column when the successor starts, so the successor
+  // gets pushed to a fresh column and the rail grows empty gaps between
+  // ribbons. That is invisible at the game-row bands (the year's header band
+  // absorbs the overhang) but glaring at zoom 3, where a season page is a
+  // whole viewport tall and entry bands anchor exactly at the page boundary.
+  // Fanning up keeps every tail inside its own tenure, so slots are released
+  // the moment the tenure ends.
   const entryRows = new Set(ribbons.map((r) => r.y0));
   const exitGroups = new Map();
   for (const r of ribbons) {
@@ -196,18 +227,20 @@ export function buildStaffRibbons({
     exitGroups.get(r.exitY).push(r);
   }
   for (const group of exitGroups.values()) {
-    group.sort((a, b) => b.y0 - a.y0);
+    group.sort((a, b) => a.y0 - b.y0);
     group.forEach((r, i) => {
-      r.exitY += (group.length - 1 - i) * stripHeight;
+      r.exitY -= (group.length - 1 - i) * stripHeight;
     });
     let extra = 0;
-    while (group.some((r) => entryRows.has(r.exitY + extra))) {
+    while (group.some((r) => entryRows.has(r.exitY - extra))) {
       extra += stripHeight;
     }
-    if (extra) {
-      for (const r of group) r.exitY += extra;
+    for (const r of group) {
+      // Never ride up onto (or above) the ribbon's own entry band: the path
+      // needs stripY < exitY to draw the tail between the two bends.
+      r.exitY = Math.max(r.y0 + stripHeight, r.exitY - extra);
+      r.tailEnd = r.exitY + stripHeight;
     }
-    for (const r of group) r.tailEnd = r.exitY + stripHeight;
   }
 
   // ---- global tail slots: adjacent columns, slots reused ----
@@ -253,21 +286,32 @@ export function buildStaffRibbons({
   return { ribbons: shown, railWidth, slotCount: slots, tailW };
 }
 
-// Scroll-dependent entry-band placement. Returns Map<ribbon.key,
-// { y, mode }> where mode is "anchored" | "pinned" | "departing".
+// Scroll-dependent entry-band placement. Returns
+//   { strips: Map<ribbon.key, { y, mode }>, stackHeight }
+// where mode is "anchored" | "pinned" | "departing" and every y is a CONTENT
+// coordinate.
 //
-// Stack model (fixes pass-through and top-of-timeline occlusion):
-//   - Candidates are walked in anchor order. The k-th pinned band's slot is
-//     scrollY + k*(STRIP_H+gap). An incoming anchored band PINS the moment
-//     its anchor reaches its future slot (bottom of the current stack), not
-//     when it crosses the viewport top — so it can never scroll up "through"
-//     the stack.
-//   - At scrollY=0 every slot equals the band's reserved anchor position,
-//     so the stack and the timeline's reserved rows coincide: nothing at the
-//     top of the timeline is covered.
-//   - A band whose exit row has risen to its slot is DEPARTING: it leaves
-//     the stack (the bands below compact up) and rides its fixed exit row
-//     up and off. Render order: anchored under departing under pinned.
+// Stack model — the stack hangs ABOVE the scroll position, and the timeline is
+// pushed down past it:
+//   - The renderer draws content at `y + stackHeight - scrollY`, so content
+//     coordinate `scrollY` lands at viewport `stackHeight`: the stack occupies
+//     the top `stackHeight` px of the canvas and the timeline starts directly
+//     beneath it. Ribbons therefore cover nothing, at any zoom, at any scroll
+//     position — no per-year layout reserve can do this, because how many
+//     people are in post changes as you scroll through a year, not just at
+//     year boundaries.
+//   - A band PINS the moment its anchor row passes the stack's bottom edge
+//     (content y = scrollY), so it can never scroll up "through" the stack.
+//     Pinned bands fill upward from that edge in anchor order: the
+//     longest-serving sits on top, the newest arrival on the bottom row,
+//     immediately above the timeline.
+//   - The handover is seamless: a band anchored at exactly y0 = scrollY draws
+//     at viewport `stackHeight`, and one frame later — pinned at
+//     scrollY - stripHeight with the stack one row taller — it draws at
+//     `(stackHeight + stripHeight) - stripHeight`, the same pixel.
+//   - A band whose exit row has passed the stack's bottom edge is DEPARTING:
+//     it leaves the stack (the bands below compact up) and rides its fixed
+//     exit row up and off. Render order: anchored under departing under pinned.
 export function resolveRibbonStrips({
   ribbons,
   scrollY = 0,
@@ -275,7 +319,7 @@ export function resolveRibbonStrips({
   gap = STRIP_GAP,
 } = {}) {
   const strips = new Map();
-  if (!ribbons?.length) return strips;
+  if (!ribbons?.length) return { strips, stackHeight: 0 };
 
   const order = ribbons
     .filter((r) => r.tailEnd > scrollY)
@@ -287,21 +331,28 @@ export function resolveRibbonStrips({
         String(a.name).localeCompare(String(b.name)),
     );
 
-  let k = 0;
+  // Pass 1: classify. Pinning depends only on the band's own rows against the
+  // stack's bottom edge, so the stack height falls out of the count — no
+  // circular "how tall is the stack I'm sizing" problem.
+  const pinned = [];
   for (const r of order) {
-    const slot = scrollY + k * (stripHeight + gap);
     const rest = r.hasExit ? r.exitY : r.tailEnd - stripHeight;
-    if (rest <= slot) {
+    if (rest < scrollY) {
       // leaving: off the stack, rides its exit row up and away
       strips.set(r.key, { y: rest, mode: "departing" });
-      continue;
-    }
-    if (r.y0 <= slot) {
-      strips.set(r.key, { y: slot, mode: "pinned" });
-      k += 1;
+    } else if (r.y0 < scrollY) {
+      pinned.push(r);
     } else {
       strips.set(r.key, { y: r.y0, mode: "anchored" });
     }
   }
-  return strips;
+
+  // Pass 2: stack them upward from the bottom edge, in anchor order.
+  const row = stripHeight + gap;
+  const stackHeight = pinned.length * row;
+  pinned.forEach((r, i) => {
+    strips.set(r.key, { y: scrollY - (pinned.length - i) * row, mode: "pinned" });
+  });
+
+  return { strips, stackHeight };
 }

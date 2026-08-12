@@ -28,10 +28,12 @@ import {
   useState,
 } from "react";
 import { buildTimelineLayout } from "../components/visualization/buildTimelineLayout.js";
-import { DETAIL_BANDS } from "../components/visualization/detail.js";
+import { MOBILE_BANDS } from "../components/visualization/detail.js";
 import { clamp, expSmooth, pickBand, visualScaleFor } from "./zoomMath.js";
 
-const N = DETAIL_BANDS.length;
+// The phone ladder stops at ERA_SUMMARY: DETAIL_BANDS' two coarse bands share
+// zoom rung 1, so walking through both gave two consecutive "Eras" stops.
+const N = MOBILE_BANDS.length;
 const TAP_SLOP = 5; // px of pointer travel before a press counts as a drag
 // Horizontal reveal: a one-finger gesture locks to "h" only when it clearly
 // beats vertical (AXIS_BIAS) — otherwise the browser scrolls. The rail opens to
@@ -53,6 +55,9 @@ export default function useTimelineViewport({
   modules = [],
   moduleData = {},
   reserveByYear = {},
+  // Extra scroll range for the pinned-ribbon stack, which pushes the timeline
+  // down by its live height (staffRibbonModel.maxStackHeight).
+  ribbonSlack = 0,
   height = 0,
   initialBandIndex = 2, // SEASON_LINES
   focusYear = null,
@@ -72,9 +77,11 @@ export default function useTimelineViewport({
   const scrollRef = useRef(null);
 
   // Precompute every band's layout once; switching bands is a pure index change.
+  // `pageHeight` sizes the zoom-3 season pages to the viewport (snap paging),
+  // so layouts rebuild on resize — not on scroll/zoom.
   const layouts = useMemo(
     () =>
-      DETAIL_BANDS.map((band) =>
+      MOBILE_BANDS.map((band) =>
         buildTimelineLayout({
           seasons,
           modules,
@@ -83,17 +90,31 @@ export default function useTimelineViewport({
           detailBand: band,
           top: 0,
           showPlayoffs,
+          pageHeight: height,
         }),
       ),
-    [seasons, modules, moduleData, reserveByYear, showPlayoffs],
+    [seasons, modules, moduleData, reserveByYear, showPlayoffs, height],
   );
-  const bandHeights = useMemo(
-    () => layouts.map((l) => Math.max(1, l.totalHeight)),
-    [layouts],
-  );
+  // Gesture-space heights. pickBand's log-space walk assumes heights strictly
+  // DECREASE with less detail, but the zoom-3 page mode (each season padded to
+  // a full viewport) can make GAME_BANDS taller than GAME_DETAIL on tall
+  // screens — which would make the band unstable (resting at its own natural
+  // height would immediately re-commit the neighbor). So the GESTURE space
+  // enforces monotonicity (each band ≥ 1.3× the next-less-detailed one) while
+  // layouts render their actual heights; visualScale settles to 1 at rest
+  // either way, so the correction is invisible outside mid-gesture.
+  const bandHeights = useMemo(() => {
+    const out = layouts.map((l) => Math.max(1, l.totalHeight));
+    for (let i = out.length - 2; i >= 0; i--) {
+      out[i] = Math.max(out[i], out[i + 1] * 1.3);
+    }
+    return out;
+  }, [layouts]);
 
   const layout = layouts[clamp(bandIndex, 0, N - 1)];
-  const maxScroll = Math.max(0, layout.totalHeight - height);
+  // scrollRange = the timeline plus room for the ribbon stack it hides behind.
+  const scrollRange = layout.totalHeight + ribbonSlack;
+  const maxScroll = Math.max(0, scrollRange - height);
   const scrollY = clamp(scrollYState, 0, maxScroll);
 
   // --- refs mirroring state for use inside rAF / event callbacks ---
@@ -239,12 +260,22 @@ export default function useTimelineViewport({
   const applyGestureHRef = useRef(applyGestureH);
   applyGestureHRef.current = applyGestureH;
 
-  // Keep the resting gestureH locked to the committed band's natural height
+  // Keep the resting zoom state locked to the committed band's natural height
   // when no zoom is in flight, so layout reflows don't leave a stale scale.
+  //
+  // visualScale MUST be reset here too, not just gestureH. Layouts rebuild
+  // whenever the viewport height changes — and the hide-on-scroll header
+  // docking in/out changes it by its full 48px — so a reflow lands mid-life
+  // with visualScale still holding whatever the last pinch left it at. The
+  // canvas then renders scaled about scaleAnchorY, which slides the pinned
+  // ribbon stack off the top of the viewport (a few px of phantom offset above
+  // the first ribbon, at every zoom). At rest the scale is 1 by definition.
   useEffect(() => {
     if (!rafRef.current && !pinchActiveRef.current) {
       gestureHRef.current = bandHeights[bandIndexRef.current];
       zoomTargetRef.current = gestureHRef.current;
+      setVisualScale(1);
+      setScaleAnchorY(0);
     }
   }, [bandHeights]);
 
@@ -456,12 +487,13 @@ export default function useTimelineViewport({
   );
 
   return {
-    band: DETAIL_BANDS[bandIndex],
+    band: MOBILE_BANDS[bandIndex],
     bandIndex,
     scrollY,
     maxScroll,
     layout,
     totalHeight: layout.totalHeight,
+    scrollRange,
     visualScale,
     scaleAnchorY,
     railPan,

@@ -40,8 +40,21 @@ const SEA_FRAC = 0.6; // nominal time share of a season   (OFF_FRAC + SEA_FRAC =
 // the big year, that season's record, and the all-time win-rate value. We
 // reserve real layout space for it (below any ribbon-entry reserve, above the
 // content modules) so the header never overlaps the draft class beneath it.
-const OFF_HEADER_FULL = 38; // header px in full mode    (zoom 3/4)
-const OFF_HEADER_COMPACT = 30; // header px in compact mode (zoom 2)
+const OFF_HEADER_FULL = 38; // header px in full mode (zoom 4)
+// Both of these lead with the year, and both carry ~12px of breathing room
+// above it (the page's arriving-ribbon rows sit directly on top of the header,
+// the card's border does).
+const OFF_HEADER_COMPACT = 56; // Seasons-card header (year+grade row, win% row)
+const OFF_HEADER_PAGE = 72; // season-page header (big year + win-rate pill)
+
+// Season-page ("Season by season", zoom 3) section geometry: each year is a
+// full-viewport snap page of stacked sections — REGULAR SEASON (record line +
+// W/L chip row), DRAFT CLASS (label + module), PLAYOFFS (label + result).
+const SEC_LABEL_H = 24; // section divider + letterspaced label
+const REC_LINE_H = 20; // record line under REGULAR SEASON
+const CHIPS_H = 26; // W/L chip row
+const SEC_PAD = 10;
+const POST_LINE_H = 22; // playoff result line ("Missed Playoffs" / finish)
 
 // A season header strip sits at the TOP of each season block — under the
 // offseason paper, directly above the games — and lays out that year's record.
@@ -67,8 +80,12 @@ export function buildTimelineLayout({
   minOffseasonHeight = 6,
   minSeasonHeight = 14,
   showPlayoffs = true,
+  // Viewport height; in page mode each year's offseason+season pair is
+  // padded to at least this so seasons snap one-per-screen.
+  pageHeight = 0,
 }) {
   const geom = geometryFor(detailBand);
+  const isPage = geom.season.mode === "page";
   const sorted = [...(seasons || [])].sort((a, b) => a.year - b.year);
 
   // Modules visible at this detail band (and only when offseasons aren't hidden).
@@ -89,8 +106,9 @@ export function buildTimelineLayout({
     const offY0 = y;
     const reserve = Math.max(0, reserveByYear[year] || 0);
     // Header band height by mode; hidden bands get none (no banner there).
-    const headerH =
-      geom.offseason === "hidden"
+    const headerH = isPage
+      ? OFF_HEADER_PAGE
+      : geom.offseason === "hidden"
         ? 0
         : geom.offseason === "full"
           ? OFF_HEADER_FULL
@@ -99,18 +117,31 @@ export function buildTimelineLayout({
     //   header (the year marker)  ->  ribbon-entry reserve  ->  content modules
     // The year therefore sits ABOVE the incoming-ribbons area. ribbonTop marks
     // where entry bands anchor (consumed by staffRibbonModel).
-    const ribbonTop = offY0 + headerH;
-    const bodyTop = ribbonTop + reserve;
+    // PAGE mode inverts the first two — personnel ribbons ride the very top of
+    // the season page, the big year below — and holds NO modules (the draft
+    // renders as a section of the season page instead, per the mockup's
+    // section order).
+    //
+    // The CARRIED-OVER stack (people already in post) is not reserved here:
+    // the renderer pushes the whole timeline down by the live stack height
+    // instead (see resolveRibbonStrips), which is the only thing that works
+    // mid-year as well as at year boundaries. `reserve` covers this year's
+    // arrivals, which anchor at a fixed row until they pin.
+    const ribbonTop = isPage ? offY0 : offY0 + headerH;
+    const headerY = isPage ? offY0 + reserve : offY0;
+    const bodyTop = isPage ? headerY + headerH : ribbonTop + reserve;
     const moduleBoxes = [];
     let cursor = bodyTop + offseasonPadding;
-    for (const m of activeModules) {
-      const h = Math.max(
-        0,
-        m.measure({ year, detailBand, mode: geom.offseason, data: moduleData }) || 0,
-      );
-      if (h <= 0) continue;
-      moduleBoxes.push({ id: m.id, module: m, y: cursor, height: h });
-      cursor += h + offseasonPadding;
+    if (!isPage) {
+      for (const m of activeModules) {
+        const h = Math.max(
+          0,
+          m.measure({ year, detailBand, mode: geom.offseason, data: moduleData }) || 0,
+        );
+        if (h <= 0) continue;
+        moduleBoxes.push({ id: m.id, module: m, y: cursor, height: h });
+        cursor += h + offseasonPadding;
+      }
     }
     // A banner year with no modules is still a real block: just its header.
     const minOff = reserve + headerH + (headerH ? 0 : minOffseasonHeight);
@@ -127,6 +158,7 @@ export function buildTimelineLayout({
       height: offHeight,
       reserve,
       headerHeight: headerH,
+      headerY,
       ribbonTop,
       tStart: year - OFF_FRAC,
       tEnd: year,
@@ -137,8 +169,9 @@ export function buildTimelineLayout({
 
     // ---- SEASON BLOCK (games of `year`, below its offseason) ----
     const seaY0 = y;
-    const seaHeaderH =
-      geom.offseason === "hidden"
+    const seaHeaderH = isPage
+      ? 0
+      : geom.offseason === "hidden"
         ? 0
         : geom.season.mode === "rows"
           ? SEASON_HEADER_FULL
@@ -150,7 +183,60 @@ export function buildTimelineLayout({
     let seaHeight;
     let gamePositions;
     let postseason = null;
-    if (geom.season.mode === "rows") {
+    let page = null;
+    let seaModules;
+    if (isPage) {
+      // ---- SEASON PAGE (zoom 3): stacked sections, mockup order ----
+      //   REGULAR SEASON (record + W/L chips) -> DRAFT CLASS -> PLAYOFFS
+      // padded so offseason+season fill at least one viewport (snap page).
+      const reg = games.filter((g) => !g.is_playoff);
+      const post = showPlayoffs ? games.filter((g) => g.is_playoff) : [];
+      const regularLabelY = seaY0 + SEC_PAD;
+      const recY = regularLabelY + SEC_LABEL_H;
+      const chipsY = recY + REC_LINE_H + 4;
+      let cursor = chipsY + CHIPS_H + SEC_PAD;
+      seaModules = [];
+      let draftLabelY = null;
+      for (const m of activeModules) {
+        const h = Math.max(
+          0,
+          m.measure({ year, detailBand, mode: geom.offseason, data: moduleData }) || 0,
+        );
+        if (h <= 0) continue;
+        if (draftLabelY == null) {
+          draftLabelY = cursor;
+          cursor += SEC_LABEL_H;
+        }
+        seaModules.push({ id: m.id, module: m, y: cursor, height: h });
+        cursor += h + SEC_PAD;
+      }
+      if (showPlayoffs) {
+        const labelY = cursor;
+        const resultY = labelY + SEC_LABEL_H;
+        const postChipsY = post.length ? resultY + POST_LINE_H + 2 : null;
+        cursor = (postChipsY != null ? postChipsY + CHIPS_H : resultY + POST_LINE_H) + SEC_PAD;
+        postseason = {
+          kind: "pageSection",
+          labelY,
+          resultY,
+          chipsY: postChipsY,
+          chipsH: CHIPS_H,
+          result: playoffsResult,
+          games: post.map((g, i) => ({ g, i })),
+        };
+      }
+      seaHeight = Math.max(minSeasonHeight, cursor - seaY0);
+      // Fill to a full viewport so seasons snap one-per-screen (oversized
+      // content simply makes a taller page you scroll within).
+      if (pageHeight > 0) {
+        seaHeight = Math.max(seaHeight, pageHeight - offHeight);
+      }
+      page = { regularLabelY, recY, chipsY, chipsH: CHIPS_H, draftLabelY };
+      // Nominal per-game positions (win-rate curve anchoring): spread evenly
+      // through the page like the line modes.
+      const mReg = reg.length || 1;
+      gamePositions = reg.map((g, i) => ({ g, i, y: seaY0 + ((i + 0.5) / mReg) * seaHeight }));
+    } else if (geom.season.mode === "rows") {
       const rh = geom.season.gameRowHeight;
       // Regular-season games make the main block; playoff games are pulled out
       // into the postseason segment below.
@@ -200,6 +286,10 @@ export function buildTimelineLayout({
       gameRowHeight: geom.season.mode === "rows" ? geom.season.gameRowHeight : null,
       games: gamePositions,
       season: s,
+      // Page mode only: section offsets + the draft module box (the draft
+      // renders as a season-page section, not in the offseason block).
+      page,
+      modules: seaModules,
     };
     blocks.push(seaBlock);
     y = seaY1;
