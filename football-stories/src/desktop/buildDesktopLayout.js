@@ -2,9 +2,22 @@
 // components/visualization/buildTimelineLayout.js.
 //
 // Time is the ordering principle left→right; pixel WIDTH is content-driven: a
-// season's width comes from its game columns (or a collapsed line), an
-// offseason's width from its year-banner column + reserved ribbon-connector
-// space + content module columns. Blocks stack contiguously along x.
+// season's width comes from the column its content needs (a game log, or a
+// collapsed line), an offseason's width from its year-banner column + reserved
+// ribbon-connector space + content module columns. Blocks stack contiguously
+// along x.
+//
+// WITHIN a block, content still reads top-to-bottom the normal way: a season's
+// games are a vertical LOG of horizontal rows, not one column per game. Only
+// the timeline axis is transposed on desktop; the things sitting on it are not.
+//
+// ONE EXCEPTION — FIT MODE. The coarsest band (Eras) inverts that: it takes the
+// viewport width as a given and solves for the season column, so the entire
+// franchise history lands edge to edge with no horizontal scrolling at all.
+// Offseason widths are still content-driven (they're independent of the season
+// width), so the solve is a single pre-pass: measure every offseason, divide
+// what's left among the seasons. Callers opt in by passing `fitWidth`; the band
+// opts in via `season.fit` in DESKTOP_GEOMETRY.
 //
 // Block order (left = earliest). For each season year Y we emit, in order:
 //   offseason(Y)  -- the run-up to season Y (banner column, draft class Y)
@@ -39,17 +52,46 @@ const OFF_FRAC = 0.4; // nominal time share of an offseason (axis/anchor only)
 const SEA_FRAC = 0.6; // nominal time share of a season
 
 // The offseason renders as a full-height "year banner" COLUMN: the big year at
-// the top, the season's record/division/point-diff lines beneath it, and the
-// all-time win-rate pill riding the curve. Real layout width is reserved for it
+// the top, then the season's record / playoff finish / division / point-diff
+// lines, then the all-time win-rate pill. Real layout width is reserved for it
 // so it never overlaps the draft column to its right.
-export const OFF_HEADER_W_FULL = 58; // banner column px in full mode (zoom 3/4)
-export const OFF_HEADER_W_COMPACT = 46; // banner column px in compact mode (zoom 2)
+//
+// Sized so every one of those lines is plainly legible rather than clipped: the
+// widest fact ("Last in Div") and the win-rate pill both have to fit INSIDE the
+// column now, because the pill no longer floats out over the lane (it used to
+// ride the win-rate curve, where it collided with ribbons and draft columns).
+//
+// The gutters live HERE, next to the width they're a part of, rather than in
+// the renderer that draws against them — the column width is only correct
+// relative to its own padding, and splitting the two across files is how they
+// drift. BANNER_PAD_L is the year headline's left margin: at 6px the year sat
+// hard against the paper's edge, running into whatever the previous season left
+// there, which is what made the whole run of years read as mashed together.
+export const BANNER_PAD_L = 18;
+export const BANNER_PAD_R = 8;
+const BANNER_CONTENT_W = 80; // widest fact line / win-rate pill must fit this
+export const OFF_HEADER_W_FULL = BANNER_PAD_L + BANNER_CONTENT_W + BANNER_PAD_R;
+export const OFF_HEADER_W_COMPACT = OFF_HEADER_W_FULL;
 
-// Postseason segment, stacked RIGHT of the regular-season games (zoom 3/4):
-// at zoom 4 a rotated "POSTSEASON" label column + win/loss arrow columns; at
-// zoom 3 it collapses to a compact medal-bordered result column.
-export const POST_HEADER_W = 14; // label column left of the playoff game columns (zoom 4)
-export const POST_RESULT_W = 22; // compact result column (zoom 3)
+// Fit mode (ERA_SUMMARY) bounds on the derived season column.
+//
+// CEILING so a short franchise history doesn't blow single seasons up into
+// meaningless slabs when there's space to burn.
+//
+// FLOOR because the fit is not always satisfiable: every personnel ribbon
+// reserves a CONN_W column in its entry year, and a franchise with decades of
+// coaches, GMs and owners on screen can reserve enough width that "fit the
+// viewport" would only be reachable by crushing seasons into hairlines — the
+// exact cramping this band is meant to relieve. Season legibility wins; the
+// band scrolls a little instead. With a typical selection it still fits exactly.
+export const ERA_FIT_MAX_SEASON_W = 72;
+export const ERA_FIT_MIN_SEASON_W = 16;
+
+// Postseason segment, stacked BENEATH the regular-season rows (zoom 3/4). The
+// game log reads downward, so "after the regular season" is simply "lower in
+// the column" — no rotated label column, no sideways result strip. It carries
+// playoff game rows when we have them, and degrades to a one-line medal-bordered
+// result strip when all we know is how the run ended.
 
 export function buildDesktopLayout({
   seasons,
@@ -62,11 +104,16 @@ export function buildDesktopLayout({
   offseasonPadding = 6,
   minOffseasonWidth = 6,
   // Lower floor than mobile's 14px tap-target minimum: desktop pointers are
-  // precise, and clamping would squeeze ERA_SUMMARY (12) and
-  // FRANCHISE_OVERVIEW (5) toward identical widths — leaving the two coarse
-  // bands indistinguishable and their total widths too close for the zoom's
-  // log-space hysteresis to ever walk between them.
+  // precise, and a higher floor would fight fit mode on long franchise
+  // histories in a narrow window (see fitWidth below), pushing ERA_SUMMARY's
+  // total width up toward SEASON_LINES' — close enough that the zoom's
+  // log-space hysteresis could no longer walk cleanly between them.
   minSeasonWidth = 5,
+  // Viewport width in px. Only consumed by bands whose season geometry is
+  // marked `fit` (ERA_SUMMARY): the season column is derived so the ENTIRE
+  // franchise history lands edge to edge with no horizontal scrolling. 0 (the
+  // pre-measure frame) falls back to the band's static `width`.
+  fitWidth = 0,
   showPlayoffs = true,
 }) {
   const geom = desktopGeometryFor(detailBand);
@@ -76,6 +123,44 @@ export function buildDesktopLayout({
   const activeModules = showModules
     ? modules.filter((m) => bandAtLeast(detailBand, m.minBand))
     : [];
+
+  // ---- fit mode: solve for the season width that fills the viewport ----
+  // Offseason widths are independent of the season width (banner column +
+  // ribbon reserve + module columns), so the remaining space divides evenly
+  // among the seasons. Only reachable at bands with `offseason: "hidden"` and
+  // no modules, where an offseason block is exactly reserve + minOffseasonWidth
+  // — but the pre-pass measures the same quantities the main loop does rather
+  // than assuming that, so `fit` stays correct if a coarse band ever gains a
+  // banner or a module.
+  let lineWidth = geom.season.mode === "line" ? geom.season.width : null;
+  if (geom.season.mode === "line" && geom.season.fit && fitWidth > 0 && sorted.length) {
+    const headerW =
+      geom.offseason === "hidden"
+        ? 0
+        : geom.offseason === "full"
+          ? OFF_HEADER_W_FULL
+          : OFF_HEADER_W_COMPACT;
+    let offTotal = 0;
+    for (const s of sorted) {
+      const reserve = Math.max(0, reserveByYear[s.year] || 0);
+      let cursor = offseasonPadding;
+      for (const m of activeModules) {
+        const w = Math.max(
+          0,
+          m.measure({ year: s.year, detailBand, mode: geom.offseason, data: moduleData }) || 0,
+        );
+        if (w > 0) cursor += w + offseasonPadding;
+      }
+      const minOff = reserve + headerW + (headerW ? 0 : minOffseasonWidth);
+      offTotal += cursor > offseasonPadding
+        ? Math.max(minOff, headerW + reserve + cursor)
+        : minOff;
+    }
+    lineWidth = Math.max(
+      Math.max(minSeasonWidth, ERA_FIT_MIN_SEASON_W),
+      Math.min(ERA_FIT_MAX_SEASON_W, (fitWidth - offTotal) / sorted.length),
+    );
+  }
 
   const blocks = [];
   const byYear = new Map();
@@ -139,34 +224,25 @@ export function buildDesktopLayout({
     let seaWidth;
     let gamePositions;
     let postseason = null;
-    if (geom.season.mode === "cols") {
-      const gw = geom.season.gameColWidth;
+    if (geom.season.mode === "rows") {
+      // A game LOG: one horizontal row per game, stacking downward inside a
+      // fixed-width column. Only x is decided here — row y is a render-time
+      // concern, because the renderer shrinks the row pitch to fit the lane
+      // rather than truncating the log (see SeasonBlock).
       const reg = games.filter((g) => !g.is_playoff);
       const post = showPlayoffs ? games.filter((g) => g.is_playoff) : [];
-      const regLeft = seaX0 + seasonPadding / 2;
-      gamePositions = reg.map((g, i) => ({ g, i, x: regLeft + (i + 0.5) * gw }));
-      let cursorX = regLeft + reg.length * gw;
-      const isDetail = detailBand === "GAME_DETAIL"; // zoom 4
-      if (isDetail && post.length) {
-        const headerX = cursorX + seasonPadding;
-        const colsLeft = headerX + POST_HEADER_W;
-        postseason = {
-          kind: "cols",
-          x0: headerX,
-          headerW: POST_HEADER_W,
-          colW: gw,
-          result: playoffsResult,
-          games: post.map((g, i) => ({ g, i, x: colsLeft + (i + 0.5) * gw })),
-        };
-        cursorX = colsLeft + post.length * gw;
-      } else if (!isDetail && (post.length || playoffsResult)) {
-        const stripX = cursorX + seasonPadding;
-        postseason = { kind: "result", x0: stripX, width: POST_RESULT_W, result: playoffsResult };
-        cursorX = stripX + POST_RESULT_W;
+      seaWidth = Math.max(minSeasonWidth, geom.season.width + seasonPadding);
+      gamePositions = reg.map((g, i) => ({ g, i }));
+      if (post.length) {
+        // Playoff games are their own labeled section BENEATH the regular
+        // season — the log reads downward, so that's simply "later".
+        postseason = { kind: "rows", result: playoffsResult, games: post.map((g, i) => ({ g, i })) };
+      } else if (playoffsResult) {
+        // Reached the postseason but we have no game-level rows for it.
+        postseason = { kind: "result", result: playoffsResult };
       }
-      seaWidth = Math.max(minSeasonWidth, cursorX + seasonPadding / 2 - seaX0);
     } else {
-      seaWidth = Math.max(minSeasonWidth, geom.season.width);
+      seaWidth = Math.max(minSeasonWidth, lineWidth);
       const lineX = seaX0 + seaWidth / 2;
       gamePositions = games.map((g, i) => ({ g, i, x: lineX }));
     }
@@ -182,7 +258,8 @@ export function buildDesktopLayout({
       tStart: year,
       tEnd: year + SEA_FRAC,
       mode: geom.season.mode,
-      gameColWidth: geom.season.mode === "cols" ? geom.season.gameColWidth : null,
+      // Nominal row pitch for rows mode; the renderer may shrink it to fit.
+      gameRowHeight: geom.season.mode === "rows" ? geom.season.gameRowHeight : null,
       games: gamePositions,
       season: s,
     };

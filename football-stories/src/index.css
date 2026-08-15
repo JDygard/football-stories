@@ -46,11 +46,14 @@ body {
   justify-content: center;
 }
 
-/* --- Portrait device frame ------------------------------------------------
-   This app is designed for phones only. On phone-sized viewports the frame is
-   just a full-bleed wrapper (no visual change). On anything wider we letterbox
-   it into a centred portrait window on a dark backdrop rather than stretching a
-   mobile layout across a desktop browser.
+/* --- Device frame ----------------------------------------------------------
+   A full-bleed wrapper at every viewport width. This used to letterbox the
+   mobile tree into a centred 9:19.5 portrait window on a dark backdrop above
+   560px; that's gone. The backdrop and the padding it added to #root applied
+   to the DESKTOP tree too (nothing ever set the body[data-view] attribute the
+   desktop stylesheet tried to undo it with), so a dark band framed the
+   landscape timeline at every width over 560px. The mobile tree now simply
+   fills whatever window it's given, which is what a tablet wants anyway.
 
    LOAD-BEARING: `transform: translateZ(0)` makes .app-frame the containing
    block for `position: fixed` descendants (Footer, drawers, TeamSelect,
@@ -69,46 +72,6 @@ body {
   overflow: hidden;
   background: #fff;
   transform: translateZ(0);
-}
-
-.frame-hint {
-  display: none;
-}
-
-@media (min-width: 560px) {
-  html,
-  body {
-    background: #0e1116;
-  }
-
-  #root {
-    gap: 14px;
-    padding: 18px 0;
-    box-sizing: border-box;
-  }
-
-  .app-frame {
-    /* 9 : 19.5 ≈ a modern phone; height-driven so it fits the window */
-    flex: 0 0 auto;
-    height: min(calc(100dvh - 76px), 920px);
-    aspect-ratio: 9 / 19.5;
-    width: auto;
-    max-width: calc(100vw - 32px);
-    border-radius: 26px;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.08),
-      0 26px 70px rgba(0, 0, 0, 0.6);
-  }
-
-  .frame-hint {
-    display: block;
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.4;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.45);
-    letter-spacing: 0.01em;
-  }
 }
 
 h1 {

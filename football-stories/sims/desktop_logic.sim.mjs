@@ -1,13 +1,26 @@
 // Node simulation of the desktop pure-logic modules (vite build can't run in
 // the sandbox). Synthetic franchise: 30 seasons, playoffs, staff, draft data.
-import { buildDesktopLayout } from "../src/desktop/buildDesktopLayout.js";
-import { DETAIL_BANDS, desktopGeometryFor } from "../src/desktop/desktopDetail.js";
+import {
+  buildDesktopLayout, ERA_FIT_MAX_SEASON_W, ERA_FIT_MIN_SEASON_W,
+} from "../src/desktop/buildDesktopLayout.js";
+import {
+  DESKTOP_BANDS, ZOOM_LEVELS, desktopGeometryFor, zoomLabelFor,
+} from "../src/desktop/desktopDetail.js";
 import {
   buildDesktopRibbons, stripReserveByYear, CONN_W, BAND_H, MIN_BAND_H,
   buildPillPlan, layoutPillRows, pillWidth,
 } from "../src/desktop/desktopRibbonModel.js";
-import { measureDraftDesktop, CHIP_COL_W, FULL_COL_W } from "../src/desktop/desktopDraftModel.js";
+import {
+  measureDraftDesktop, shortName, COMPACT_COL_W, FULL_COL_W,
+} from "../src/desktop/desktopDraftModel.js";
 import { pickBand } from "../src/hooks/zoomMath.js";
+import {
+  buildEraBoxes, eraYearsLabel, estimateTextWidth,
+  ERA_LABEL_FS, ERA_YEARS_FS, ERA_TEXT_INSET,
+} from "../src/desktop/desktopEraModel.js";
+
+// Viewport width the fit-mode (Eras) assertions reason about.
+const VIEWPORT_W = 1600;
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -67,18 +80,62 @@ const reserveByYear = stripReserveByYear(staff);
 ok(reserveByYear[1990] === 2 * CONN_W, `reserve 1990 = 2 connectors (got ${reserveByYear[1990]})`);
 ok(reserveByYear[2006] === 2 * CONN_W, "reserve 2006 = 2 connectors");
 
+// ---- the ladder is exactly the four user-facing rungs ----
+ok(DESKTOP_BANDS.length === ZOOM_LEVELS,
+  `desktop ladder = ${ZOOM_LEVELS} rungs (got ${DESKTOP_BANDS.length}: ${DESKTOP_BANDS.join(",")})`);
+{
+  const rungs = DESKTOP_BANDS.map((b) => zoomLabelFor(b).zoom);
+  ok(new Set(rungs).size === DESKTOP_BANDS.length,
+    `no two bands share a zoom rung (got ${rungs.join(",")})`);
+  ok(new Set(DESKTOP_BANDS.map((b) => zoomLabelFor(b).name)).size === DESKTOP_BANDS.length,
+    "no two bands share a zoom name");
+}
+
 // ---- layouts per band ----
-const layouts = DETAIL_BANDS.map((band) =>
-  buildDesktopLayout({ seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear, detailBand: band }),
+const layouts = DESKTOP_BANDS.map((band) =>
+  buildDesktopLayout({
+    seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear,
+    detailBand: band, fitWidth: VIEWPORT_W,
+  }),
 );
 const widths = layouts.map((l) => l.totalWidth);
-console.log("band widths:", DETAIL_BANDS.map((b, i) => `${b}=${widths[i]}`).join("  "));
+console.log("band widths:", DESKTOP_BANDS.map((b, i) => `${b}=${Math.round(widths[i])}`).join("  "));
 for (let i = 1; i < widths.length; i++) {
-  ok(widths[i] < widths[i - 1], `totalWidth monotonic decreasing at ${DETAIL_BANDS[i]}`);
+  ok(widths[i] < widths[i - 1], `totalWidth monotonic decreasing at ${DESKTOP_BANDS[i]}`);
+}
+// Adjacent bands must stay far enough apart in log space that pickBand's
+// hysteresis can actually walk between them (that's what killed the fifth band).
+// pickBand's algebra needs ratio > exp(2 * hyst) ≈ 1.271; assert 1.35 so
+// retuning a band width has somewhere to go before the zoom silently sticks.
+const MIN_BAND_RATIO = 1.35;
+for (let i = 1; i < widths.length; i++) {
+  ok(widths[i - 1] / widths[i] > MIN_BAND_RATIO,
+    `bands ${DESKTOP_BANDS[i - 1]}/${DESKTOP_BANDS[i]} distinguishable (ratio ${(widths[i - 1] / widths[i]).toFixed(2)})`);
+}
+// Ribbon reserve is a constant ADDED to both sides of every ratio, so a heavily
+// populated rail compresses them. Since row-mode season columns are fixed width,
+// that compression is no longer offset by anything — check the crowded case too.
+{
+  const heavy = stripReserveByYear(
+    Array.from({ length: 40 }, (_, i) => ({
+      admin_person_id: `h${i}`, name: `H${i}`, role: "coach",
+      from: 1990 + (i % 29), to: 1990 + (i % 29) + 2,
+    })),
+  );
+  const hw = DESKTOP_BANDS.map((band) =>
+    buildDesktopLayout({
+      seasons, modules: [fakeDraftModule], moduleData: modData,
+      reserveByYear: heavy, detailBand: band, fitWidth: VIEWPORT_W,
+    }).totalWidth,
+  );
+  for (let i = 1; i < hw.length; i++) {
+    ok(hw[i - 1] / hw[i] > MIN_BAND_RATIO,
+      `crowded rail keeps ${DESKTOP_BANDS[i - 1]}/${DESKTOP_BANDS[i]} distinguishable (ratio ${(hw[i - 1] / hw[i]).toFixed(2)})`);
+  }
 }
 
 for (const [i, L] of layouts.entries()) {
-  const band = DETAIL_BANDS[i];
+  const band = DESKTOP_BANDS[i];
   // contiguity + alternation
   let prev = 0, lastX1 = L.left;
   for (const b of L.blocks) {
@@ -109,32 +166,116 @@ for (const [i, L] of layouts.entries()) {
       ok(m.x >= off.ribbonLeft + off.reserve, `${band}: module clear of reserve (1990)`);
     }
   }
-  // game columns inside season block, ordered
-  const sea = L.byYear.get(1992).season;
-  if (sea.mode === "cols") {
-    let px = -Infinity;
-    for (const { x } of sea.games) {
-      ok(x > px, `${band}: game cols ordered`);
-      px = x;
-      ok(x > sea.x0 && x < sea.x1, `${band}: game col inside block`);
-    }
-    if (band === "GAME_DETAIL") {
-      ok(sea.postseason && sea.postseason.kind === "cols", `${band}: postseason cols in playoff year`);
-      ok(sea.postseason.games.every(({ x }) => x < sea.x1), `${band}: playoff cols inside block`);
-    } else {
-      ok(sea.postseason && sea.postseason.kind === "result", `${band}: postseason result strip`);
-    }
+  // rows mode: the season is a game LOG in a fixed-width column. Every regular
+  // game gets a row, in order, and playoff games are their own section beneath.
+  const sea = L.byYear.get(1992).season; // a playoff year in the fixture
+  if (sea.mode === "rows") {
+    const reg = seasons.find((s) => s.year === 1992).games.filter((g) => !g.is_playoff);
+    ok(sea.games.length === reg.length,
+      `${band}: every regular-season game has a row (${sea.games.length} vs ${reg.length})`);
+    ok(sea.games.every(({ i }, k) => i === k), `${band}: rows in game order`);
+    ok(sea.games.every(({ g }) => !g.is_playoff), `${band}: playoff games kept out of the regular rows`);
+    // Fixed column: the width can't depend on how many games were played, which
+    // is the whole reason the band widths need checking separately (see above).
+    const sea1991 = L.byYear.get(1991).season;
+    ok(sea.width === sea1991.width, `${band}: season column width is fixed, not game-count-driven`);
+    ok(sea.gameRowHeight > 0, `${band}: carries a nominal row pitch`);
+    ok(sea.postseason && sea.postseason.kind === "rows", `${band}: postseason is its own row section`);
+    ok(sea.postseason.games.every(({ g }) => g.is_playoff), `${band}: only playoff games in that section`);
+    // A year that reached the postseason with no game-level rows degrades to a
+    // one-line result strip rather than vanishing.
+    const noRows = buildDesktopLayout({
+      seasons: [{ year: 2000, games: [], season: { wins: 12, losses: 4, playoffs: "Won SB" } }],
+      modules: [], moduleData: {}, reserveByYear: {}, detailBand: band,
+    }).byYear.get(2000).season;
+    ok(noRows.postseason && noRows.postseason.kind === "result" && noRows.postseason.result === "Won SB",
+      `${band}: playoff finish without game rows degrades to a result strip`);
+    // showPlayoffs off suppresses the whole section.
+    const noPost = buildDesktopLayout({
+      seasons, modules: [], moduleData: {}, reserveByYear: {},
+      detailBand: band, showPlayoffs: false,
+    }).byYear.get(1992).season;
+    ok(noPost.postseason === null, `${band}: showPlayoffs=false drops the postseason section`);
   }
 }
 
+// ---- fit mode: the Eras band fills the viewport exactly ----
+{
+  const eraIdx = DESKTOP_BANDS.indexOf("ERA_SUMMARY");
+  const era = layouts[eraIdx];
+  ok(Math.abs(era.totalWidth - VIEWPORT_W) < 1,
+    `Eras fits the viewport (${era.totalWidth.toFixed(1)} vs ${VIEWPORT_W})`);
+  // Seasons got the leftover space, so they're far wider than the old fixed 12px
+  // — that's the breathing room the ribbons and year labels needed.
+  const w1995 = era.byYear.get(1995).season.width;
+  ok(w1995 > 12, `fit widens season columns (got ${w1995.toFixed(1)})`);
+  ok(w1995 <= ERA_FIT_MAX_SEASON_W + 1e-9, `fit respects the ceiling (got ${w1995.toFixed(1)})`);
+  // Every season column is the same width; only offseasons (ribbon reserve) vary.
+  const seasonWidths = new Set(
+    era.blocks.filter((b) => b.type === "season").map((b) => b.width.toFixed(6)),
+  );
+  ok(seasonWidths.size === 1, `fit season columns uniform (got ${seasonWidths.size} distinct)`);
+
+  // A wider window yields a wider band; a narrow one clamps to the floor and
+  // scrolls rather than collapsing seasons to nothing.
+  const wide = buildDesktopLayout({
+    seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear,
+    detailBand: "ERA_SUMMARY", fitWidth: 2400,
+  });
+  ok(Math.abs(wide.totalWidth - 2400) < 1, `fit tracks the window (got ${wide.totalWidth.toFixed(1)})`);
+  const tiny = buildDesktopLayout({
+    seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear,
+    detailBand: "ERA_SUMMARY", fitWidth: 120,
+  });
+  ok(tiny.byYear.get(1995).season.width === ERA_FIT_MIN_SEASON_W,
+    `unsatisfiable fit floors the season column (got ${tiny.byYear.get(1995).season.width})`);
+  ok(tiny.totalWidth > 120, "over-narrow window scrolls rather than crushing seasons");
+
+  // Same story with a heavily-populated rail: 40 tracked people reserve enough
+  // connector columns that the fit can't be met, and seasons hold the floor.
+  const crowdSpans = Array.from({ length: 40 }, (_, i) => ({
+    admin_person_id: `c${i}`, name: `C${i}`, role: "coach",
+    from: 1990 + (i % 29), to: 1990 + (i % 29) + 3,
+  }));
+  const crowded = buildDesktopLayout({
+    seasons, modules: [fakeDraftModule], moduleData: modData,
+    reserveByYear: stripReserveByYear(crowdSpans),
+    detailBand: "ERA_SUMMARY", fitWidth: VIEWPORT_W,
+  });
+  ok(crowded.byYear.get(1995).season.width >= ERA_FIT_MIN_SEASON_W,
+    `crowded rail never crushes seasons (got ${crowded.byYear.get(1995).season.width})`);
+
+  // No fitWidth (the pre-measure frame) falls back to the static width.
+  const unmeasured = buildDesktopLayout({
+    seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear,
+    detailBand: "ERA_SUMMARY",
+  });
+  ok(unmeasured.byYear.get(1995).season.width === 12, "no fitWidth falls back to the static width");
+}
+
+// Bands WITHOUT `fit` ignore fitWidth entirely — only Eras is viewport-driven.
+for (const band of ["GAME_DETAIL", "GAME_BANDS", "SEASON_LINES"]) {
+  const a = buildDesktopLayout({ seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear, detailBand: band, fitWidth: 800 });
+  const b = buildDesktopLayout({ seasons, modules: [fakeDraftModule], moduleData: modData, reserveByYear, detailBand: band, fitWidth: 3000 });
+  ok(a.totalWidth === b.totalWidth, `${band} is content-driven, not viewport-driven`);
+}
+
 // draft measure modes
-ok(measureDraftDesktop({ year: 1991, mode: "compact", data: modData }) === CHIP_COL_W, "compact class = chip column");
+ok(measureDraftDesktop({ year: 1991, mode: "compact", data: modData }) === COMPACT_COL_W, "compact class = labeled grade column");
 ok(measureDraftDesktop({ year: 1995, mode: "compact", data: modData }) === FULL_COL_W, "expanded compact class = full column");
 ok(measureDraftDesktop({ year: 1991, mode: "full", data: modData }) === FULL_COL_W, "full mode = full column");
 ok(measureDraftDesktop({ year: 1975, mode: "full", data: modData }) === 0, "no picks = 0 width");
 
+// grade-box name formatting
+ok(shortName("Jamarr Chase") === "J. Chase", `shortName basic (got ${shortName("Jamarr Chase")})`);
+ok(shortName("Odell Beckham Jr.") === "O. Beckham", `shortName drops suffix (got ${shortName("Odell Beckham Jr.")})`);
+ok(shortName("Robert Griffin III") === "R. Griffin", `shortName drops numeral suffix (got ${shortName("Robert Griffin III")})`);
+ok(shortName("Ochocinco") === "Ochocinco", "shortName passes a mononym through");
+ok(shortName("") === "—", "shortName handles a missing name");
+ok(shortName("Amon-Ra St. Brown") === "A. Brown", `shortName multi-token surname (got ${shortName("Amon-Ra St. Brown")})`);
+
 // ---- ribbons on the SEASON_LINES layout ----
-const L2 = layouts[2];
+const L2 = layouts[DESKTOP_BANDS.indexOf("SEASON_LINES")];
 const rb = buildDesktopRibbons({ staff, layout: L2 });
 console.log(`ribbons: ${rb.ribbons.length}, slots: ${rb.slotCount}, bandH: ${rb.bandH}, railHeight: ${rb.railHeight}`);
 ok(rb.ribbons.length === staff.length, "all spans became ribbons");
@@ -221,14 +362,142 @@ ok(rb2.slotCount === 12, `crowd slots = 12 (got ${rb2.slotCount})`);
 ok(rb2.bandH < BAND_H && rb2.bandH >= MIN_BAND_H, `crowd bands squished (bandH=${rb2.bandH})`);
 ok(rb2.railHeight <= 6 * BAND_H, `rail within squish budget (${rb2.railHeight})`);
 
+// ---- NAMED ERAS: curated era rows -> frame boxes ----
+// Synthetic franchise runs 1990..2019, so these cover the three cases the
+// curated file can legitimately produce: an ordinary interior era, one that
+// runs past the last played season (ongoing), and one authored entirely
+// outside the data.
+const eraLayout = buildDesktopLayout({
+  seasons, modules: [], moduleData: {}, reserveByYear: {},
+  detailBand: "ERA_SUMMARY", fitWidth: VIEWPORT_W,
+});
+const eraRows = [
+  { id: "early", label: "The Early Years", short: "Early", start: 1990, end: 1999 },
+  { id: "one", label: "The Long Name Of A Single Lost Season", short: "Lost", start: 2003, end: 2003 },
+  { id: "nano", label: "Another Very Long Name For One Season", start: 2006, end: 2006 },
+  { id: "late", label: "The Modern Era", start: 2010, end: null, ongoing: true },
+  { id: "ghost", label: "Before The Data", start: 1950, end: 1960 },
+];
+const eraBoxes = buildEraBoxes({ eras: eraRows, layout: eraLayout });
+
+ok(eraBoxes.length === 4, `eras outside the data are dropped (got ${eraBoxes.length})`);
+ok(!eraBoxes.some((b) => b.id === "ghost"), "the pre-data era is the one dropped");
+
+const byId = Object.fromEntries(eraBoxes.map((b) => [b.id, b]));
+ok(byId.early.x0 === eraLayout.byYear.get(1990).offseason.x0,
+  "a frame opens at its first year's OFFSEASON edge");
+ok(byId.early.x1 === eraLayout.byYear.get(1999).season.x1,
+  "a frame closes at its last year's SEASON edge");
+// An ongoing era stops at the last season played, not off the end of the
+// timeline — the curated `end: null` is resolved against the data.
+ok(byId.late.lastYear === 2019 && byId.late.x1 === eraLayout.byYear.get(2019).season.x1,
+  `an ongoing era clamps to the last played season (got ${byId.late.lastYear})`);
+ok(byId.late.x1 <= eraLayout.totalWidth, "no frame runs past the timeline");
+
+// Frames never overlap, because the curated file forbids overlapping eras
+// (eras.py enforces it) — so the boxes must come out in order and disjoint.
+const ordered = [...eraBoxes].sort((a, b) => a.x0 - b.x0);
+for (let i = 1; i < ordered.length; i++) {
+  ok(ordered[i].x0 >= ordered[i - 1].x1,
+    `era frames stay disjoint (${ordered[i - 1].id} -> ${ordered[i].id})`);
+}
+for (const b of eraBoxes) ok(b.width > 0, `${b.id} frame has width`);
+
+// Title fit: a wide frame keeps its full label; a one-season frame can't hold
+// either the label or the short form, but still shows its years.
+ok(byId.early.labelText === "The Early Years", "a wide frame keeps its full title");
+// At the coarsest band a single season is ~50px wide: too narrow for the
+// title AND for the short form, so the frame carries only its years.
+ok(byId.one.labelText === null,
+  `a one-season frame at Eras drops the title entirely (got ${JSON.stringify(byId.one.labelText)})`);
+ok(byId.nano.labelText === null,
+  `…short form or not (got ${JSON.stringify(byId.nano.labelText)})`);
+// …and at that width the standardized 26px gutter leaves no room for the years
+// either, so a single season at the coarsest zoom is a bare tinted frame. It
+// gets its label back one rung down (asserted below). Standardising the gutter
+// is worth this: the alternative was every frame indenting differently.
+ok(!byId.nano.showYears, "a one-season frame at Eras carries no caption at all");
+ok(byId.one.yearsText === "2003", "a one-season era reads as a single year");
+ok(byId.late.yearsText === "2010–now", "an ongoing era reads as -now");
+ok(eraYearsLabel({ start: 1998, end: 2010 }) === "1998–2010", "closed eras read start-end");
+// Whatever fits is measured the same way the renderer will draw it.
+for (const b of eraBoxes) {
+  if (b.labelText) {
+    ok(estimateTextWidth(b.labelText, ERA_LABEL_FS, "serif") <= b.width,
+      `${b.id} title fits inside its frame`);
+  }
+}
+
+// The frames follow the layout, so they still line up one rung down (Seasons).
+const eraLayout2 = buildDesktopLayout({
+  seasons, modules: [], moduleData: {}, reserveByYear: {}, detailBand: "SEASON_LINES",
+});
+const eraBoxes2 = buildEraBoxes({ eras: eraRows, layout: eraLayout2 });
+ok(eraBoxes2.length === 4, "same eras survive at the Seasons band");
+ok(eraBoxes2[0].x0 === eraLayout2.byYear.get(1990).offseason.x0,
+  "frames re-solve against the Seasons-band layout");
+ok(eraBoxes2[0].width > byId.early.width,
+  "a wider band gives the same era a wider frame");
+// The label -> short -> nothing fallback, exercised where it actually bites:
+// one Seasons-band season is wide enough for "Lost" but not for the full name.
+const byId2 = Object.fromEntries(eraBoxes2.map((b) => [b.id, b]));
+ok(byId2.one.labelText === "Lost",
+  `a narrow frame falls back to the authored short form (got ${JSON.stringify(byId2.one.labelText)})`);
+ok(byId2.nano.labelText === null,
+  `…and to nothing when no short form was authored (got ${JSON.stringify(byId2.nano.labelText)})`);
+ok(byId2.one.showYears && byId2.nano.showYears,
+  "one-season frames get their years back at the Seasons band");
+
+// THE standardized gutter: every line of era text starts exactly
+// ERA_TEXT_INSET from its own frame's left border — no proportional drift —
+// and still ends inside the frame.
+for (const b of [...eraBoxes, ...eraBoxes2]) {
+  ok(b.textX === b.x0 + ERA_TEXT_INSET, `${b.id} text hangs off the standard gutter`);
+  if (b.labelText) {
+    ok(b.labelX === b.textX, `${b.id} title shares the gutter`);
+    ok(b.labelX + estimateTextWidth(b.labelText, ERA_LABEL_FS, "serif") <= b.x1 + 0.01,
+      `${b.id} title stays inside its frame`);
+  }
+  if (b.showYears) ok(b.yearsX === b.textX, `${b.id} years share the gutter`);
+}
+// The width estimate is per-character, not per-glyph-count: a string of narrow
+// letters must measure narrower than the same number of wide ones, or short
+// chapter names get dropped from frames they comfortably fit.
+ok(estimateTextWidth("IIIIII", ERA_LABEL_FS, "serif") <
+   estimateTextWidth("MMMMMM", ERA_LABEL_FS, "serif"),
+  "narrow glyphs measure narrower than wide ones at equal length");
+// …and tracking counts toward the fit, which is what keeps a spaced-out date
+// line inside its own frame.
+ok(estimateTextWidth("1970–1972", ERA_YEARS_FS, "sans", 2) >
+   estimateTextWidth("1970–1972", ERA_YEARS_FS, "sans"),
+  "letter tracking counts toward the fit");
+
+// Two frames of different widths put their text the same distance in — the
+// property a proportional anchor could never give.
+ok(byId.early.labelX - byId.early.x0 === byId2.early.labelX - byId2.early.x0,
+  "the gutter is identical across bands and frame widths");
+// Adjacent eras never share a palette slot.
+for (let i = 1; i < eraBoxes.length; i++) {
+  ok(eraBoxes[i].tone !== eraBoxes[i - 1].tone, `era ${i} has its own tone`);
+}
+
 // ---- zoom band picking over desktop widths ----
+const LAST = widths.length - 1;
 let committed = 2;
 committed = pickBand(widths[0], committed, widths);
 ok(committed === 0, `pickBand walks to most detail (got ${committed})`);
-committed = pickBand(widths[4], committed, widths);
-ok(committed === 4, `pickBand walks to least detail (got ${committed})`);
-committed = pickBand(Math.sqrt(widths[2] * widths[3]), 2, widths);
+committed = pickBand(widths[LAST], committed, widths);
+ok(committed === LAST, `pickBand walks to least detail (got ${committed})`);
+committed = pickBand(Math.sqrt(widths[2] * widths[LAST]), 2, widths);
 ok(committed === 2, "hysteresis holds at a boundary");
+// Every rung is reachable from every other, in both directions — the property
+// the removed fifth band broke when its width converged on ERA_SUMMARY's.
+for (let from = 0; from <= LAST; from++) {
+  for (let to = 0; to <= LAST; to++) {
+    ok(pickBand(widths[to], from, widths) === to,
+      `rung ${from} -> ${to} reachable (got ${pickBand(widths[to], from, widths)})`);
+  }
+}
 
 console.log(failures ? `\n${failures} FAILURES` : "\nALL SIMS PASS");
 process.exit(failures ? 1 : 0);

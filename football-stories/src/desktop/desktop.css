@@ -21,13 +21,78 @@
   transform: translateZ(0);
 }
 
-/* When the desktop tree is mounted (main.jsx sets body[data-view]), undo the
-   letterbox styling index.css applies to wide viewports: no dark backdrop, no
-   centering padding — the frame fills the window edge to edge. */
-body[data-view="desktop"] {
-  background: #fff;
+/* --- Career-follow sweep ----------------------------------------------------
+   Following a "To <team>" / "From <team>" pill moves the whole timeline AWAY
+   from wherever the destination lies, and brings that team in from the side the
+   destination sits on. The motion is VERTICAL because that's the geometry the
+   ribbons already establish: a tenure's exit connector drops DOWNWARD out of
+   the rail to its "To <team>" pill, and its entry connector arrives from the
+   pill zone ABOVE the lane. So the next team in a career is literally below the
+   screen and the previous one is above it.
+
+     forward (an exit pill, "he went to the Jets"):
+       the current team leaves through the TOP, the Jets arrive from the BOTTOM
+       — you travel down the ribbon, following it off the bottom of the view.
+     back (an entry pill, "he came from the Jets"):
+       exactly reversed — out through the bottom, in from the top.
+
+   Applied to the timeline PANE only. The header and the control dock hold
+   perfectly still, and the pane keeps its box, so nothing about the layout or
+   the whitespace moves — only the painted content travels inside it.
+
+   The soft edge is a mask, not padding, for that same reason: it costs no
+   layout, and because it rides on the moving element the content's own leading
+   edge is what dissolves. It runs top-to-bottom to match the travel.
+
+   Durations are mirrored in DesktopApp (SWEEP_OUT_MS / SWEEP_IN_MS); the state
+   machine there also waits for the destination data, so a slow fetch extends
+   the gap between these two animations rather than cutting either one short.
+
+   NOTE: an animated transform makes this pane a containing block for any
+   `position: fixed` descendant, the same trick .desktop-frame relies on. Today
+   nothing inside the timeline pane is fixed (the zoom HUD and info cards are
+   absolute/relative) — if that changes, position it outside the pane. */
+.desktop-sweep-out-fwd,
+.desktop-sweep-in-fwd,
+.desktop-sweep-out-back,
+.desktop-sweep-in-back {
+  -webkit-mask-image: linear-gradient(
+    to bottom, transparent 0, #000 40px, #000 calc(100% - 40px), transparent 100%);
+  mask-image: linear-gradient(
+    to bottom, transparent 0, #000 40px, #000 calc(100% - 40px), transparent 100%);
+  will-change: transform, opacity;
 }
-body[data-view="desktop"] #root {
-  padding: 0;
-  gap: 0;
+
+.desktop-sweep-out-fwd { animation: desktop-sweep-out-fwd 220ms cubic-bezier(0.4, 0, 1, 1) forwards; }
+.desktop-sweep-in-fwd { animation: desktop-sweep-in-fwd 280ms cubic-bezier(0, 0, 0.2, 1) both; }
+.desktop-sweep-out-back { animation: desktop-sweep-out-back 220ms cubic-bezier(0.4, 0, 1, 1) forwards; }
+.desktop-sweep-in-back { animation: desktop-sweep-in-back 280ms cubic-bezier(0, 0, 0.2, 1) both; }
+
+/* forward: away from the destination (up and out), destination in from below */
+@keyframes desktop-sweep-out-fwd {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(-14%); opacity: 0; }
+}
+@keyframes desktop-sweep-in-fwd {
+  from { transform: translateY(14%); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* back: the previous team is above, so leave downward and arrive from the top */
+@keyframes desktop-sweep-out-back {
+  from { transform: none; opacity: 1; }
+  to { transform: translateY(14%); opacity: 0; }
+}
+@keyframes desktop-sweep-in-back {
+  from { transform: translateY(-14%); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* Keep the hand-off legible without the travel for anyone who'd rather not
+   have it: same timings, cross-fade only. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes desktop-sweep-out-fwd { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes desktop-sweep-in-fwd { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes desktop-sweep-out-back { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes desktop-sweep-in-back { from { opacity: 0; } to { opacity: 1; } }
 }

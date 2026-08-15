@@ -33,10 +33,12 @@ import {
   useState,
 } from "react";
 import { buildDesktopLayout } from "./buildDesktopLayout.js";
-import { DETAIL_BANDS } from "./desktopDetail.js";
+import { DESKTOP_BANDS } from "./desktopDetail.js";
 import { clamp, expSmooth, pickBand, visualScaleFor } from "../hooks/zoomMath.js";
 
-const N = DETAIL_BANDS.length;
+// DESKTOP_BANDS, not DETAIL_BANDS: the desktop ladder is exactly the four
+// user-facing rungs (Eras / Seasons / Season by season / Every game).
+const N = DESKTOP_BANDS.length;
 const TAP_SLOP = 5; // px of pointer travel before a press counts as a drag
 // A drag locks to an axis only when it clearly wins (AXIS_BIAS); horizontal
 // mouse drags pan the scroller, vertical drags do nothing (no reveal).
@@ -67,9 +69,11 @@ export default function useDesktopViewport({
   const scrollRef = useRef(null);
 
   // Precompute every band's layout once; switching bands is a pure index change.
+  // `width` is a dependency because the Eras band is fit-to-viewport — a window
+  // resize genuinely changes its geometry, unlike the other three.
   const layouts = useMemo(
     () =>
-      DETAIL_BANDS.map((band) =>
+      DESKTOP_BANDS.map((band) =>
         buildDesktopLayout({
           seasons,
           modules,
@@ -77,10 +81,11 @@ export default function useDesktopViewport({
           reserveByYear,
           detailBand: band,
           left: 0,
+          fitWidth: width,
           showPlayoffs,
         }),
       ),
-    [seasons, modules, moduleData, reserveByYear, showPlayoffs],
+    [seasons, modules, moduleData, reserveByYear, width, showPlayoffs],
   );
   const bandWidths = useMemo(
     () => layouts.map((l) => Math.max(1, l.totalWidth)),
@@ -334,11 +339,26 @@ export default function useDesktopViewport({
   const pressYRef = useRef(null);
   const axisRef = useRef(null); // null | "h" | "v"
   const movedRef = useRef(false);
+  // Pointer id we captured for an in-flight drag, or null. Only set once a
+  // press has been promoted to a drag — see onPointerDown for why.
+  const capturedIdRef = useRef(null);
 
   const onPointerDown = useCallback((e) => {
-    // Capturing a TOUCH pointer would steal it from the native scroller; only
-    // capture the mouse (which never triggers native scroll anyway).
-    if (e.pointerType === "mouse") e.currentTarget.setPointerCapture?.(e.pointerId);
+    // DELIBERATELY NOT capturing the pointer here.
+    //
+    // While a pointer is captured, Chrome retargets the compatibility mouse
+    // events — mousedown, mouseup and crucially CLICK — to the capturing
+    // element. Capturing on pointerdown therefore sent every click to this
+    // scroll container instead of the ribbon, career-follow pill or draft row
+    // the user actually pressed, and none of their onClick handlers ever ran:
+    // tapping a name opened no info card, and tapping a "To <team>" pill
+    // navigated nowhere. Nothing about the markup or the geometry looked wrong,
+    // which is what made it hard to see.
+    //
+    // Capture is taken in onPointerMove instead, once the gesture has actually
+    // become a drag — at which point retargeting the trailing click away from
+    // whatever was under the cursor is exactly what we want (it's the same
+    // click tapGuard exists to swallow).
     pressXRef.current = e.clientX;
     pressYRef.current = e.clientY;
     dragXRef.current = e.clientX;
@@ -357,6 +377,13 @@ export default function useDesktopViewport({
         if (Math.max(Math.abs(tdx), Math.abs(tdy)) > TAP_SLOP) {
           axisRef.current = Math.abs(tdy) > Math.abs(tdx) * AXIS_BIAS ? "v" : "h";
           movedRef.current = true;
+          // The gesture is now a drag, so take the pointer: the pan keeps
+          // tracking if the cursor leaves the container mid-drag. Mouse only —
+          // capturing a TOUCH pointer would steal it from the native scroller.
+          if (e.pointerType === "mouse" && capturedIdRef.current == null) {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            capturedIdRef.current = e.pointerId;
+          }
         } else {
           dragXRef.current = e.clientX;
           dragYRef.current = e.clientY;
@@ -376,12 +403,14 @@ export default function useDesktopViewport({
   );
 
   const endPointer = useCallback((e) => {
-    if (e.pointerType === "mouse") {
+    // Release only what we actually captured (a plain click never captures).
+    if (capturedIdRef.current != null) {
       try {
-        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        e.currentTarget.releasePointerCapture?.(capturedIdRef.current);
       } catch {
-        /* ignore */
+        /* the pointer may already be gone */
       }
+      capturedIdRef.current = null;
     }
     axisRef.current = null;
     pressXRef.current = null;
@@ -400,7 +429,7 @@ export default function useDesktopViewport({
   );
 
   return {
-    band: DETAIL_BANDS[bandIndex],
+    band: DESKTOP_BANDS[bandIndex],
     bandIndex,
     scrollX,
     maxScroll,

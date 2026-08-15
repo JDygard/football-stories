@@ -1,7 +1,10 @@
 // Desktop zoom HUD — the landscape sibling of components/ZoomHud.jsx. Same
-// self-fading caption keyed by the committed band, but positioned ABSOLUTE at
-// the bottom of the timeline pane (the desktop shell has no footer bar to
-// clear, and the caption shouldn't span the persistent sidebar).
+// self-fading caption keyed by the committed band, positioned ABSOLUTE at the
+// bottom of the timeline pane — it fades out over the timeline and stops at the
+// control dock rather than overlaying it.
+//
+// The desktop ladder is exactly ZOOM_LEVELS rungs now (DESKTOP_BANDS drops the
+// duplicate coarse band), so LevelBars maps one bar per rung with none doubled.
 
 import { useEffect, useRef } from "react";
 import { ZOOM_LEVELS, zoomLabelFor } from "./desktopDetail.js";

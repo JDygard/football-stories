@@ -6,6 +6,7 @@ import Main from './components/Main.jsx'
 import Footer, { BAR_H } from './components/Footer.jsx'
 import LeagueView from './components/LeagueView.jsx'
 import MethodologyView from './components/MethodologyView.jsx'
+import AboutView from './components/AboutView.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import useTeamData from './hooks/useTeamData'
 import { FRAME_ID } from './utils/frameRect'
@@ -22,6 +23,7 @@ function App() {
   const [settings, setSettings] = useState({});
   const [leagueOpen, setLeagueOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   // What the ribbon layer shows: staff role toggles + selected player spans.
   const [ribbonConfig, setRibbonConfig] = useState(DEFAULT_RIBBONS);
   // Deep-link target: when set, the timeline scrolls to this year once the
@@ -31,7 +33,8 @@ function App() {
   // re-selected + scrolled to once the destination team's data has mounted.
   const [pendingFollow, setPendingFollow] = useState(null);
 
-  const { mapped, loading, draftSegment, adminById } = useTeamData(selectedTeam);
+  const { mapped, loading, draftSegment, erasSegment, adminById } =
+    useTeamData(selectedTeam);
 
   const mainRef = useRef(null);
 
@@ -160,6 +163,7 @@ function App() {
           setSelectedTeam={selectTeam}
           onOpenLeague={() => setLeagueOpen(true)}
           onOpenMethodology={() => setMethodologyOpen(true)}
+          onOpenAbout={() => setAboutOpen(true)}
           onSearchSelect={goTo}
         />
         <div style={{ width: '100%', flex: 1, height: '100%' }}>
@@ -167,6 +171,7 @@ function App() {
             ref={mainRef}
             mapped={mapped}
             draftSegment={draftSegment}
+            erasSegment={erasSegment}
             settings={settings}
             adminById={adminById}
             focusYear={readyFocusYear}
@@ -189,13 +194,14 @@ function App() {
         {methodologyOpen && (
           <MethodologyView onClose={() => setMethodologyOpen(false)} />
         )}
+        {aboutOpen && (
+          <AboutView
+            onClose={() => setAboutOpen(false)}
+            onOpenMethodology={() => setMethodologyOpen(true)}
+          />
+        )}
       </div>
       </div>
-      {/* Desktop-only affordance note (hidden under 560px by index.css): the
-          app's zoom is a pinch gesture on touch, ctrl/⌘-wheel with a mouse. */}
-      <p className="frame-hint">
-        Built for mobile — hold <kbd>Ctrl</kbd> (or <kbd>⌘</kbd>) and scroll to zoom.
-      </p>
     </ErrorBoundary>
   )
 }

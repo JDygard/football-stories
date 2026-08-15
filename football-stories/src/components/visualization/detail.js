@@ -37,8 +37,13 @@ export const DEFAULT_BAND = "GAME_DETAIL";
 // Bands the MOBILE (portrait) zoom ladder actually stops at. The glossary puts
 // both coarse bands on rung 1, so exposing them as two separate stops gave the
 // phone two consecutive "Eras" levels; mobile stops at ERA_SUMMARY instead.
-// FRANCHISE_OVERVIEW stays in DETAIL_BANDS because the desktop tree, with far
-// more horizontal room, still uses it as its own rung.
+//
+// Desktop reached the same conclusion later and independently — see
+// DESKTOP_BANDS in desktop/desktopDetail.js, which filters the same band out,
+// because its Eras band now sizes itself to the viewport and leaves a coarser
+// band nothing left to show. FRANCHISE_OVERVIEW is therefore on NEITHER ladder
+// today; it stays in DETAIL_BANDS only because bandForYearsVisible still
+// returns it and the rank/hysteresis helpers are defined over the full list.
 export const MOBILE_BANDS = DETAIL_BANDS.filter((b) => b !== "FRANCHISE_OVERVIEW");
 
 // Total user-facing zoom rungs (1 = most years on screen … 4 = every game).

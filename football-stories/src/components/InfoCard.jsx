@@ -1,9 +1,19 @@
-// Floating info card for a tapped player (draft pick) or staff member
-// (tenure ribbon). Fetches the full player/admin segment for rich stats but
-// renders immediately from what the tap already knows.
+// Info card for a tapped player (draft pick) or staff member (tenure ribbon).
+// Fetches the full player/admin segment for rich stats but renders immediately
+// from what the tap already knows.
 //
 // Stats are position-relevant: a QB card shows passing, a corner shows
 // coverage numbers — no interception column for Peyton Manning.
+//
+// TWO PRESENTATIONS, one card body:
+//   floating (default — mobile) one card at a time, pinning itself to the
+//     corner over the timeline, dismissed by tapping anywhere outside it.
+//   docked (`docked` — desktop) the card is laid out by a parent shelf instead
+//     of positioning itself, and does NOT self-dismiss on an outside click, so
+//     several can stay open side by side and be compared. Closing is explicit,
+//     via the × (or Escape, which clears them all).
+// Only the chrome differs; everything below the header is shared, so the two
+// modes can't drift apart on content.
 
 import { useEffect, useRef, useState } from "react";
 import { tierColor, tierTextColor, gradeOf } from "./visualization/offseason/draftModel.js";
@@ -107,12 +117,8 @@ function collapseStints(records) {
   return stints;
 }
 
-const cardStyle = {
-  position: "absolute",
-  top: 12,
-  right: 12,
+const CARD_BODY = {
   width: 280,
-  maxHeight: "75%",
   overflowY: "auto",
   background: "#fff",
   border: "1px solid #ccc",
@@ -121,21 +127,32 @@ const cardStyle = {
   padding: "12px 14px",
   fontSize: 12,
   color: "#222",
-  zIndex: 30,
 };
+
+// Floating pins itself over the timeline; docked lets the shelf place it and
+// fills the height the shelf allows.
+const cardStyleFor = (docked) =>
+  docked
+    ? { ...CARD_BODY, position: "relative", flex: "0 0 auto", maxHeight: "100%" }
+    : { ...CARD_BODY, position: "absolute", top: 12, right: 12, maxHeight: "75%", zIndex: 30 };
 
 // Close when a pointer-down lands outside the card. The opening tap has
 // already completed by the time this effect attaches its listener, so it
 // won't immediately self-dismiss.
-function useDismiss(onClose) {
+//
+// Disabled when docked: several cards are open on purpose there, and an
+// outside-click dismiss would close them all the moment you clicked the
+// timeline to open the next one.
+function useDismiss(onClose, enabled = true) {
   const ref = useRef(null);
   useEffect(() => {
+    if (!enabled) return undefined;
     const onDown = (e) => {
       if (ref.current && !ref.current.contains(e.target)) onClose();
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
-  }, [onClose]);
+  }, [onClose, enabled]);
   return ref;
 }
 
@@ -164,9 +181,9 @@ function CloseButton({ onClose }) {
   );
 }
 
-function PlayerCard({ pick, onClose, adjusted }) {
+function PlayerCard({ pick, onClose, adjusted, docked }) {
   const [career, setCareer] = useState(pick.career || null);
-  const cardRef = useDismiss(onClose);
+  const cardRef = useDismiss(onClose, !docked);
 
   useEffect(() => {
     if (!pick.player_id) return;
@@ -191,7 +208,7 @@ function PlayerCard({ pick, onClose, adjusted }) {
   const hof = career?.hof ?? pick.career?.hof;
 
   return (
-    <div style={cardStyle} ref={cardRef}>
+    <div style={cardStyleFor(docked)} ref={cardRef}>
       <CloseButton onClose={onClose} />
       <div style={{ fontSize: 14, fontWeight: 700, paddingRight: 16 }}>
         {pick.name || "Unknown"}
@@ -250,9 +267,9 @@ function PlayerCard({ pick, onClose, adjusted }) {
   );
 }
 
-function StaffCard({ ribbon, adminById, onClose }) {
+function StaffCard({ ribbon, adminById, onClose, docked }) {
   const [records, setRecords] = useState(null);
-  const cardRef = useDismiss(onClose);
+  const cardRef = useDismiss(onClose, !docked);
 
   useEffect(() => {
     if (!ribbon.id) return;
@@ -272,7 +289,7 @@ function StaffCard({ ribbon, adminById, onClose }) {
   const stints = collapseStints(records);
 
   return (
-    <div style={cardStyle} ref={cardRef}>
+    <div style={cardStyleFor(docked)} ref={cardRef}>
       <CloseButton onClose={onClose} />
       <div style={{ fontSize: 14, fontWeight: 700, paddingRight: 16 }}>
         {ribbon.name}
@@ -308,7 +325,7 @@ function StaffCard({ ribbon, adminById, onClose }) {
   );
 }
 
-export default function InfoCard({ selection, adminById, onClose, adjusted }) {
+export default function InfoCard({ selection, adminById, onClose, adjusted, docked = false }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -319,11 +336,18 @@ export default function InfoCard({ selection, adminById, onClose, adjusted }) {
 
   if (!selection) return null;
   if (selection.type === "player") {
-    return <PlayerCard pick={selection.pick} onClose={onClose} adjusted={adjusted} />;
+    return (
+      <PlayerCard pick={selection.pick} onClose={onClose} adjusted={adjusted} docked={docked} />
+    );
   }
   if (selection.type === "staff") {
     return (
-      <StaffCard ribbon={selection.ribbon} adminById={adminById} onClose={onClose} />
+      <StaffCard
+        ribbon={selection.ribbon}
+        adminById={adminById}
+        onClose={onClose}
+        docked={docked}
+      />
     );
   }
   return null;

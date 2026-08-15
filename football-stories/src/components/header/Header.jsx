@@ -43,6 +43,8 @@ export default function Header({
   onOpenLeague,
   onOpenMethodology,
   onSearchSelect,
+  onOpenAbout,
+  onOpenTeams = null,
 }) {
   const controls = useAnimation();
 
@@ -143,10 +145,13 @@ export default function Header({
           </button>
         </div>
 
-        {/* center: team pill */}
+        {/* center: team pill. `onOpenTeams` lets a shell own the picker
+            itself — desktop opens a drawer anchored under this header instead
+            of TeamSelect's full-screen takeover. Absent (mobile), the header
+            keeps handling it. */}
         <TeamTab
           teamId={selectedTeam}
-          onOpen={() => setTeamSelectOpen(true)}
+          onOpen={() => (onOpenTeams ? onOpenTeams() : setTeamSelectOpen(true))}
         />
 
         {/* right: search */}
@@ -191,6 +196,14 @@ export default function Header({
               }}
             >
               ⓘ How grades work
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenAbout && onOpenAbout();
+              }}
+            >
+              ✎ About this project
             </MenuItem>
           </div>
         </>

@@ -9,6 +9,13 @@
 // `defaultOn` is the state when the key is absent from settings. Most features
 // are on by default (absent => on); the availability-adjusted grade is a lens
 // that defaults OFF so the standard "value delivered" grade is the baseline.
+//
+// `desktopOnly` hides a row from the mobile drawer. One component serves both
+// trees, and a toggle that flips a setting nothing in this orientation reads is
+// worse than no toggle at all — so a feature that has only shipped on desktop
+// says so here rather than showing up dead on the phone. No row carries it
+// today (Named eras was the last one, and now renders in both trees); the
+// mechanism stays for the next feature that lands on one orientation first.
 const FEATURES = [
   {
     key: "showWinRate",
@@ -20,6 +27,12 @@ const FEATURES = [
     key: "showPlayoffs",
     label: "Playoffs",
     hint: "Postseason segments, playoff result strips, and the playoff-finish medals.",
+    defaultOn: true,
+  },
+  {
+    key: "showEras",
+    label: "Named eras",
+    hint: "The curated chapters of a franchise's story (\"The Peyton Manning Era\"), framed around the years they cover at the two most zoomed-out levels.",
     defaultOn: true,
   },
   {
@@ -66,7 +79,8 @@ function Toggle({ on, onClick }) {
   );
 }
 
-export default function SettingsDrawer({ settings = {}, onChange }) {
+export default function SettingsDrawer({ settings = {}, onChange, desktop = false }) {
+  const features = desktop ? FEATURES : FEATURES.filter((f) => !f.desktopOnly);
   // absent => the feature's default (most on; the adjusted-grade lens off).
   const isOn = (key, defaultOn = true) =>
     settings[key] === undefined ? defaultOn : !!settings[key];
@@ -76,7 +90,7 @@ export default function SettingsDrawer({ settings = {}, onChange }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12.5 }}>
       <div style={{ overflowY: "auto", flex: 1, padding: "6px 8px 10px" }}>
-        {FEATURES.map((f) => {
+        {features.map((f) => {
           const on = isOn(f.key, f.defaultOn ?? true);
           return (
             <div

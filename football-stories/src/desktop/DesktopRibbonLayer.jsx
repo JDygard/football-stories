@@ -35,7 +35,14 @@ const TERM_BG = "#c3c8ce";
 const TERM_FG = "#2a2d31";
 
 // A career-follow pill, centered on its connector column.
-function FollowTag({ x, y, pill, person, conf, onFollow, tapGuard }) {
+//
+// `dir` is which way along the career this pill points: +1 for an EXIT pill
+// (where they went next) and -1 for an ENTRY pill (where they came from). It
+// rides along to onFollow so the shell can sweep the timeline to match the
+// pill's own position — an exit pill sits BELOW the rail, so its team is
+// "down there" and the view travels down to reach it; an entry pill sits above
+// the lane, so its team is up. See .desktop-sweep-* in desktop.css.
+function FollowTag({ x, y, pill, person, conf, dir, onFollow, tapGuard }) {
   const info = pill.info;
   const dest = info.kind === "dest";
   const navigable = dest && !!info.fid && conf !== "approx" && conf !== "low";
@@ -43,7 +50,7 @@ function FollowTag({ x, y, pill, person, conf, onFollow, tapGuard }) {
     ? (e) => {
         e.stopPropagation();
         if (tapGuard && tapGuard()) return;
-        onFollow?.(info.fid, info.year, person);
+        onFollow?.(info.fid, info.year, person, dir);
       }
     : undefined;
   return (
@@ -238,13 +245,13 @@ export default function DesktopRibbonLayer({
 
             {enShown && (
               <FollowTag
-                x={enP.x} y={topY}
+                x={enP.x} y={topY} dir={-1}
                 pill={enP} person={person} conf={r.conf} onFollow={onFollow} tapGuard={tapGuard}
               />
             )}
             {exShown && (
               <FollowTag
-                x={exP.x} y={botY}
+                x={exP.x} y={botY} dir={1}
                 pill={exP} person={person} conf={r.conf} onFollow={onFollow} tapGuard={tapGuard}
               />
             )}

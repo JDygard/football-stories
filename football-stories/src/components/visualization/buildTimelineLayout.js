@@ -16,6 +16,14 @@
 // of displaceY: entries occupy real layout space instead of overlaying
 // content. Modules stack below the reserved area.
 //
+// eras: the curated Named Era rows for this franchise (or null). At the two
+// coarsest bands (ERA_BANDS) each era's FIRST year buys an ERA_HEADER_H plaque
+// row at the top of its offseason block, so a chapter's title has real layout
+// space and can never land on a season, a card or a ribbon. The row belongs to
+// that block rather than sitting BETWEEN two blocks — that keeps the stack
+// contiguous, which is what tToY/yToYear (and the zoom anchor that calls them)
+// rely on. See eraModel.js.
+//
 // A nominal time coordinate (year units) is attached to every block purely for
 // axis labels and zoom anchoring; it stays monotonic and contiguous even though
 // pixels are not proportional to time:
@@ -32,6 +40,7 @@
 //   }
 
 import { geometryFor, bandAtLeast, DEFAULT_BAND } from "./detail.js";
+import { ERA_BANDS, ERA_HEADER_H, eraSpans } from "./eraModel.js";
 
 const OFF_FRAC = 0.4; // nominal time share of an offseason (axis/anchor only)
 const SEA_FRAC = 0.6; // nominal time share of a season   (OFF_FRAC + SEA_FRAC = 1)
@@ -48,8 +57,14 @@ const OFF_HEADER_COMPACT = 56; // Seasons-card header (year+grade row, win% row)
 const OFF_HEADER_PAGE = 72; // season-page header (big year + win-rate pill)
 
 // Season-page ("Season by season", zoom 3) section geometry: each year is a
-// full-viewport snap page of stacked sections — REGULAR SEASON (record line +
-// W/L chip row), DRAFT CLASS (label + module), PLAYOFFS (label + result).
+// dossier of stacked sections — REGULAR SEASON (record line + W/L chip row),
+// DRAFT CLASS (label + module), PLAYOFFS (label + result).
+//
+// These pages used to be padded to a full viewport and scroll-snapped one per
+// screen. That's gone: a page is now exactly as tall as its own content and the
+// band scrolls like every other one. The snap metered the scroll — you couldn't
+// glance across two seasons or land between them — and the padding left a lot
+// of empty screen under a short year.
 const SEC_LABEL_H = 24; // section divider + letterspaced label
 const REC_LINE_H = 20; // record line under REGULAR SEASON
 const CHIPS_H = 26; // W/L chip row
@@ -80,13 +95,22 @@ export function buildTimelineLayout({
   minOffseasonHeight = 6,
   minSeasonHeight = 14,
   showPlayoffs = true,
-  // Viewport height; in page mode each year's offseason+season pair is
-  // padded to at least this so seasons snap one-per-screen.
-  pageHeight = 0,
+  // Curated Named Era rows (segments/teams_eras/{FID}.json -> `eras`), or null
+  // when the franchise has none authored / the feature is toggled off.
+  eras = null,
 }) {
   const geom = geometryFor(detailBand);
   const isPage = geom.season.mode === "page";
   const sorted = [...(seasons || [])].sort((a, b) => a.year - b.year);
+
+  // Named Eras, resolved to the years actually present in the data. Only the
+  // two coarsest bands frame them; everywhere else the timeline is built
+  // exactly as it was before the feature existed.
+  const spans = ERA_BANDS.has(detailBand)
+    ? eraSpans({ eras, years: sorted.map((s) => s.year) })
+    : [];
+  const eraOpensAt = new Map(spans.map((e, i) => [e.firstYear, i]));
+  const eraBoxes = spans.map((e) => ({ ...e, y0: 0, contentY: 0, y1: 0 }));
 
   // Modules visible at this detail band (and only when offseasons aren't hidden).
   const showModules = geom.offseason !== "hidden";
@@ -104,6 +128,13 @@ export function buildTimelineLayout({
 
     // ---- OFFSEASON BLOCK (draft class `year`, sits above the season) ----
     const offY0 = y;
+    // A Named Era opening on this year buys a plaque row off the TOP of this
+    // block. Everything else in the block measures from `blockTop`, below it,
+    // so the chapter's title sits in space nothing else can occupy. When no era
+    // opens here `eraLead` is 0 and every line below is unchanged.
+    const eraIndex = eraOpensAt.get(year);
+    const eraLead = eraIndex === undefined ? 0 : ERA_HEADER_H;
+    const blockTop = offY0 + eraLead;
     const reserve = Math.max(0, reserveByYear[year] || 0);
     // Header band height by mode; hidden bands get none (no banner there).
     const headerH = isPage
@@ -127,8 +158,8 @@ export function buildTimelineLayout({
     // instead (see resolveRibbonStrips), which is the only thing that works
     // mid-year as well as at year boundaries. `reserve` covers this year's
     // arrivals, which anchor at a fixed row until they pin.
-    const ribbonTop = isPage ? offY0 : offY0 + headerH;
-    const headerY = isPage ? offY0 + reserve : offY0;
+    const ribbonTop = isPage ? blockTop : blockTop + headerH;
+    const headerY = isPage ? blockTop + reserve : blockTop;
     const bodyTop = isPage ? headerY + headerH : ribbonTop + reserve;
     const moduleBoxes = [];
     let cursor = bodyTop + offseasonPadding;
@@ -144,7 +175,7 @@ export function buildTimelineLayout({
       }
     }
     // A banner year with no modules is still a real block: just its header.
-    const minOff = reserve + headerH + (headerH ? 0 : minOffseasonHeight);
+    const minOff = eraLead + reserve + headerH + (headerH ? 0 : minOffseasonHeight);
     const offHeight = moduleBoxes.length
       ? Math.max(minOff, cursor - offY0)
       : minOff;
@@ -160,6 +191,12 @@ export function buildTimelineLayout({
       headerHeight: headerH,
       headerY,
       ribbonTop,
+      // The era plaque row this block is carrying (0 on all but an era's first
+      // year), and where the block's own content starts below it. Renderers
+      // that paint a surface for the whole block — the zoom-2 card, the zoom-4
+      // paper — must measure from `contentY`, or the card swallows the plaque.
+      eraHeaderHeight: eraLead,
+      contentY: blockTop,
       tStart: year - OFF_FRAC,
       tEnd: year,
       modules: moduleBoxes,
@@ -188,7 +225,6 @@ export function buildTimelineLayout({
     if (isPage) {
       // ---- SEASON PAGE (zoom 3): stacked sections, mockup order ----
       //   REGULAR SEASON (record + W/L chips) -> DRAFT CLASS -> PLAYOFFS
-      // padded so offseason+season fill at least one viewport (snap page).
       const reg = games.filter((g) => !g.is_playoff);
       const post = showPlayoffs ? games.filter((g) => g.is_playoff) : [];
       const regularLabelY = seaY0 + SEC_PAD;
@@ -226,11 +262,6 @@ export function buildTimelineLayout({
         };
       }
       seaHeight = Math.max(minSeasonHeight, cursor - seaY0);
-      // Fill to a full viewport so seasons snap one-per-screen (oversized
-      // content simply makes a taller page you scroll within).
-      if (pageHeight > 0) {
-        seaHeight = Math.max(seaHeight, pageHeight - offHeight);
-      }
       page = { regularLabelY, recY, chipsY, chipsH: CHIPS_H, draftLabelY };
       // Nominal per-game positions (win-rate curve anchoring): spread evenly
       // through the page like the line modes.
@@ -295,6 +326,17 @@ export function buildTimelineLayout({
     y = seaY1;
 
     byYear.set(year, { offseason: offBlock, season: seaBlock });
+
+    // Era frames close on the SEASON of their last year, so a chapter encloses
+    // whole years — the draft class that opens a year is inside the era that
+    // year belongs to, not trailing off the end of the one before it.
+    if (eraIndex !== undefined) {
+      eraBoxes[eraIndex].y0 = offY0;
+      eraBoxes[eraIndex].contentY = blockTop;
+    }
+    for (const box of eraBoxes) {
+      if (year >= box.firstYear && year <= box.lastYear) box.y1 = seaY1;
+    }
   }
 
   const totalHeight = y - top;
@@ -336,6 +378,12 @@ export function buildTimelineLayout({
   return {
     blocks,
     byYear,
+    // Named Era frames in layout coordinates: y0 = top of the plaque row,
+    // contentY = where the timeline resumes under it, y1 = bottom of the last
+    // season in the chapter. Empty at every band outside ERA_BANDS. The x
+    // extents and the text fit are the renderer's half of the job — see
+    // buildEraBoxes in eraModel.js.
+    eras: eraBoxes,
     totalHeight,
     top,
     detailBand,

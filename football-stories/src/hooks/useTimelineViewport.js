@@ -49,6 +49,10 @@ const RAIL_SPRING_TAU = 130; // ms
 const WHEEL_STEP = 90; // accumulated ctrl-wheel deltaY that advances one band
 const ANIM_DONE_PX = 0.5; // stop the zoom-settle ease within this of target
 const ANIM_TAU = 55; // ms time constant for the zoom-settle ease
+// Minimum height ratio between adjacent zoom rungs in GESTURE space. Must clear
+// pickBand's e^(2*hyst) ≈ 1.271 reachability threshold with a little room; see
+// the bandHeights note below for why the real heights don't always manage it.
+const MIN_BAND_RATIO = 1.3;
 
 export default function useTimelineViewport({
   seasons,
@@ -63,6 +67,9 @@ export default function useTimelineViewport({
   focusYear = null,
   onFocusConsumed = null,
   showPlayoffs = true,
+  // Curated Named Era rows, or null when the franchise has none authored / the
+  // toggle is off. Only the two coarsest bands' layouts do anything with them.
+  eras = null,
 }) {
   const [bandIndex, setBandIndex] = useState(initialBandIndex);
   // scrollY mirrors the scroll container's scrollTop (set from scroll events).
@@ -77,8 +84,10 @@ export default function useTimelineViewport({
   const scrollRef = useRef(null);
 
   // Precompute every band's layout once; switching bands is a pure index change.
-  // `pageHeight` sizes the zoom-3 season pages to the viewport (snap paging),
-  // so layouts rebuild on resize — not on scroll/zoom.
+  // No longer a function of the viewport height: the zoom-3 pages used to be
+  // padded to a full screen for snap paging, so layouts had to rebuild on every
+  // resize (including the 48px the hide-on-scroll header takes with it). Pages
+  // are content-height now, so nothing here depends on `height`.
   const layouts = useMemo(
     () =>
       MOBILE_BANDS.map((band) =>
@@ -90,23 +99,38 @@ export default function useTimelineViewport({
           detailBand: band,
           top: 0,
           showPlayoffs,
-          pageHeight: height,
+          eras,
         }),
       ),
-    [seasons, modules, moduleData, reserveByYear, showPlayoffs, height],
+    [seasons, modules, moduleData, reserveByYear, showPlayoffs, eras],
   );
-  // Gesture-space heights. pickBand's log-space walk assumes heights strictly
-  // DECREASE with less detail, but the zoom-3 page mode (each season padded to
-  // a full viewport) can make GAME_BANDS taller than GAME_DETAIL on tall
-  // screens — which would make the band unstable (resting at its own natural
-  // height would immediately re-commit the neighbor). So the GESTURE space
-  // enforces monotonicity (each band ≥ 1.3× the next-less-detailed one) while
-  // layouts render their actual heights; visualScale settles to 1 at rest
-  // either way, so the correction is invisible outside mid-gesture.
+  // Gesture-space heights: a SEPARATED-OUT copy of the band heights, each one
+  // forced to at least MIN_BAND_RATIO times the next-less-detailed band.
+  // Layouts still render their true heights; visualScale settles to 1 at rest
+  // either way, so the correction is invisible outside a mid-gesture frame.
+  //
+  // Two distinct things wanted this, and only one of them is gone:
+  //
+  //   * Full-viewport season pages used to make zoom 3 TALLER than zoom 4 on a
+  //     tall screen, inverting the ladder outright and leaving zoom 3 unstable
+  //     (resting at its own height instantly re-committed zoom 4). Content-
+  //     height pages removed that, so the ladder is at least ordered now.
+  //
+  //   * pickBand walks in log space with a hysteresis dead zone (hyst, ~0.12
+  //     ln-units) around each geometric-mean boundary, so a rung is only
+  //     REACHABLE if it is more than e^(2*hyst) ≈ 1.27x its neighbour. Zoom 4
+  //     against zoom 3 sits right on that line naturally (~1.27x measured — a
+  //     season page carries most of a game-row year's content, just laid out
+  //     tighter), and under it zoom 4 simply cannot be pinched into. That has
+  //     nothing to do with paging and did not go away with it.
+  //
+  // Hence the floor stays, but it is a reachability floor, not an ordering fix.
+  // sims/mobile_layout.sim.mjs asserts both halves: raw heights ordered, and
+  // every rung stable and reachable once corrected.
   const bandHeights = useMemo(() => {
     const out = layouts.map((l) => Math.max(1, l.totalHeight));
     for (let i = out.length - 2; i >= 0; i--) {
-      out[i] = Math.max(out[i], out[i + 1] * 1.3);
+      out[i] = Math.max(out[i], out[i + 1] * MIN_BAND_RATIO);
     }
     return out;
   }, [layouts]);

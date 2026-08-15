@@ -1,8 +1,17 @@
-// Node simulation of the mobile pure-logic modules after the zoom redesign
-// (2026-07-31): Seasons cards (zoom 2), snap season pages (zoom 3), renamed
-// labels, monotone gesture heights. Run: node sims/mobile_layout.sim.mjs
+// Node simulation of the mobile pure-logic modules.
+//
+// Covers the zoom redesign (2026-07-31: Seasons cards at zoom 2, season pages
+// at zoom 3, renamed labels) and the Named Eras mobile render (2026-08-15),
+// which also removed the zoom-3 snap paging — pages are content-height now, so
+// the gesture-height ladder is naturally monotone and no longer corrected.
+// Run: node sims/mobile_layout.sim.mjs
 import { buildTimelineLayout } from "../src/components/visualization/buildTimelineLayout.js";
 import { DETAIL_BANDS, MOBILE_BANDS, ZOOM_LABELS, geometryFor } from "../src/components/visualization/detail.js";
+import {
+  buildEraBoxes, eraSpans, eraTone, estimateTextWidth,
+  ERA_BANDS, ERA_HEADER_H, ERA_TEXT_INSET, ERA_EDGE_L, ERA_EDGE_R,
+  ERA_LABEL_FS, ERA_TONE_COUNT,
+} from "../src/components/visualization/eraModel.js";
 import { measureDraft, COMPACT_H, PICK_ROW_H, HEADER_H, BOTTOM_PAD } from "../src/components/visualization/offseason/draftModel.js";
 import {
   stripReserveByYear, buildStaffRibbons, resolveRibbonStrips, maxStackHeight, STRIP_H,
@@ -51,7 +60,16 @@ const staff = [
   { admin_person_id: "b", name: "Bob", role: "gm", from: 1990, to: 2005 },
 ];
 const reserveByYear = stripReserveByYear(staff);
-const PAGE_H = 750;
+// Named Eras: two adjacent chapters, a gap, an ongoing one, plus a chapter
+// whose title is far too long for a phone (exercising the short-form fallback)
+// and one that starts before the data does (clamped to the first season).
+const eras = [
+  { id: "founding", label: "The Founding", short: "Founding", start: 1985, end: 1994 },
+  { id: "the-run", label: "The Long Run", short: "Run", start: 1995, end: 1999 },
+  { id: "wilderness", label: "An Extravagantly Overlong Chapter Title", short: "Wilderness",
+    start: 2004, end: 2009 },
+  { id: "now", label: "The Modern Era", start: 2012, end: null },
+];
 
 // ---- draft measure modes ----
 ok(measureDraft({ year: 1991, mode: "compact", data: modData }) === COMPACT_H + BOTTOM_PAD,
@@ -64,7 +82,7 @@ ok(measureDraft({ year: 1991, mode: "full", data: modData }) === HEADER_H + 7 * 
 // ---- layouts across bands ----
 const layouts = MOBILE_BANDS.map((band) =>
   buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
-    reserveByYear, detailBand: band, pageHeight: PAGE_H }));
+    reserveByYear, detailBand: band }));
 const heights = layouts.map((l) => l.totalHeight);
 console.log("band heights:", MOBILE_BANDS.map((b, i) => `${b}=${Math.round(heights[i])}`).join("  "));
 
@@ -80,13 +98,21 @@ for (const [i, L] of layouts.entries()) {
   }
 }
 
-// ---- zoom 3 page mode ----
+// ---- zoom 3 pages: content height, no snap paging ----
+// The pages used to be padded to a full viewport and scroll-snapped one per
+// screen. Now a page is exactly as tall as its own sections, so a year with a
+// big draft class is a tall page and a thin year is a short one — and NOTHING
+// in the layout depends on the viewport height any more.
 const P = layouts[1]; // GAME_BANDS
 ok(geometryFor("GAME_BANDS").season.mode === "page", "GAME_BANDS is page mode");
 for (const y of [1990, 1992, 2005, 2019]) {
   const { offseason: off, season: sea } = P.byYear.get(y);
-  const pageH = sea.y1 - off.y0;
-  ok(pageH >= PAGE_H - 1e-9, `${y}: page fills viewport (${Math.round(pageH)})`);
+  // the page ends where its last section ends (playoffs), plus the section pad
+  const lastSectionEnd = sea.postseason.chipsY != null
+    ? sea.postseason.chipsY + sea.postseason.chipsH
+    : sea.postseason.resultY + 22;
+  ok(sea.y1 - lastSectionEnd < 20,
+    `${y}: page ends on its content, no viewport padding (slack ${Math.round(sea.y1 - lastSectionEnd)})`);
   // Page top: this year's arrivals, then the year/win-rate header. The
   // carried-over stack is NOT reserved here — the renderer pushes the whole
   // timeline down by the live stack height instead.
@@ -107,12 +133,15 @@ for (const y of [1990, 1992, 2005, 2019]) {
   if (y % 4 === 0) ok(sea.postseason.chipsY != null, `${y}: playoff chips row in playoff year`);
   else ok(sea.postseason.chipsY == null && sea.postseason.result == null, `${y}: missed playoffs -> result line only`);
 }
-// oversized class page grows past the viewport instead of clipping
+// an oversized draft class makes a TALLER page — the only thing that varies a
+// page's height now that the viewport doesn't
 const p92 = P.byYear.get(1992);
-ok(p92.season.y1 - p92.offseason.y0 >= PAGE_H, "1992 (25 picks) page >= viewport");
+const p93 = P.byYear.get(1993);
+ok(p92.season.y1 - p92.offseason.y0 > p93.season.y1 - p93.offseason.y0,
+  "1992 (25 picks) is a taller page than 1993 (7 picks)");
 // playoffs off -> no playoffs section anywhere
 const noPost = buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
-  reserveByYear, detailBand: "GAME_BANDS", pageHeight: PAGE_H, showPlayoffs: false });
+  reserveByYear, detailBand: "GAME_BANDS", showPlayoffs: false });
 ok([...noPost.byYear.values()].every(({ season: s }) => !s.postseason), "showPlayoffs=false drops the section");
 
 // ---- ribbons still anchor correctly in page mode ----
@@ -143,7 +172,7 @@ const relay = [
 ];
 for (const band of MOBILE_BANDS) {
   const L = buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
-    reserveByYear: stripReserveByYear(relay), detailBand: band, pageHeight: PAGE_H });
+    reserveByYear: stripReserveByYear(relay), detailBand: band });
   const slots = buildStaffRibbons({ staff: relay, layout: L }).ribbons.map((r) => r.slot);
   ok(slots.length === 2 && slots[0] === slots[1], `${band}: consecutive tenures reuse one column`);
 }
@@ -160,18 +189,131 @@ const h95 = C.byYear.get(1995).offseason.height;
 const h96 = C.byYear.get(1996).offseason.height;
 ok(h95 - h96 === 7 * PICK_ROW_H - COMPACT_H, `expanded card grows by the rows (${h95 - h96})`);
 
-// ---- monotone gesture heights (page mode can exceed zoom 4 on tall screens) ----
-const gesture = [...heights];
-for (let i = gesture.length - 2; i >= 0; i--) gesture[i] = Math.max(gesture[i], gesture[i + 1] * 1.3);
-for (let i = 1; i < gesture.length; i++) ok(gesture[i] < gesture[i - 1], `gesture heights decreasing @${i}`);
-// every band is stable: resting at its own gesture height re-picks itself
-for (let b = 0; b < gesture.length; b++) {
-  ok(pickBand(gesture[b], b, gesture) === b, `band ${b} stable at rest`);
+// ---- Named Eras ----
+const eraLayouts = MOBILE_BANDS.map((band) =>
+  buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
+    reserveByYear, detailBand: band, eras }));
+const eraHeights = eraLayouts.map((l) => l.totalHeight);
+console.log("band heights (eras on):",
+  MOBILE_BANDS.map((b, i) => `${b}=${Math.round(eraHeights[i])}`).join("  "));
+
+// Spans resolve against the DATA, not the curated range: an era starting before
+// the first season clamps to it, and an open-ended one runs to the last season.
+const spans = eraSpans({ eras, years: seasons.map((s) => s.year) });
+ok(spans.length === 4, `every era has seasons on screen (${spans.length})`);
+ok(spans[0].firstYear === 1990, "era starting before the data clamps to the first season");
+ok(spans[3].lastYear === 2019 && spans[3].ongoing, "open-ended era runs to the last season");
+ok(spans[1].lastYear === 1999 && spans[2].firstYear === 2004, "the gap between chapters is respected");
+// an era entirely outside the data is dropped, not drawn off the end
+ok(eraSpans({ eras: [{ id: "x", label: "X", start: 1950, end: 1960 }],
+  years: seasons.map((s) => s.year) }).length === 0, "era outside the data is dropped");
+// tones rotate by POSITION, so neighbours always differ
+for (let i = 1; i < spans.length; i++) ok(spans[i].tone !== spans[i - 1].tone, `tone differs @${i}`);
+ok(eraTone(0).border !== eraTone(1).border, "tones are visually distinct");
+ok(eraTone(ERA_TONE_COUNT).wash === eraTone(0).wash, "tone palette wraps");
+
+for (const [i, L] of eraLayouts.entries()) {
+  const band = MOBILE_BANDS[i];
+  const framed = ERA_BANDS.has(band);
+  ok(L.eras.length === (framed ? 4 : 0), `${band}: ${framed ? "frames its eras" : "draws no frames"}`);
+
+  // the stack stays CONTIGUOUS with plaque rows in it — tToY/yToYear (and the
+  // zoom anchor that calls them) would otherwise land in a hole
+  let lastY1 = 0;
+  for (const b of L.blocks) {
+    ok(Math.abs(b.y0 - lastY1) < 1e-9, `${band}+eras: contiguous at ${b.type} ${b.year}`);
+    lastY1 = b.y1;
+  }
+  for (const t of [1990, 1995.3, 2007.77, 2019.5]) {
+    ok(Math.abs(L.yToYear(L.tToY(t)) - t) < 1e-6, `${band}+eras: t roundtrip ${t}`);
+  }
+
+  // exactly the era-opening years carry a plaque row, and it is the only thing
+  // that grew: the band is taller by exactly one header per era
+  const openers = new Set(framed ? spans.map((e) => e.firstYear) : []);
+  for (const { offseason: off } of L.byYear.values()) {
+    const want = openers.has(off.year) ? ERA_HEADER_H : 0;
+    ok(off.eraHeaderHeight === want, `${band}: ${off.year} plaque row = ${want}`);
+    ok(off.contentY === off.y0 + want, `${band}: ${off.year} content starts under the plaque`);
+    // everything inside the block measures from contentY, never from y0
+    ok(off.headerY >= off.contentY - 1e-9, `${band}: ${off.year} year header below the plaque`);
+    ok(off.ribbonTop >= off.contentY - 1e-9, `${band}: ${off.year} arrivals below the plaque`);
+    for (const m of off.modules) ok(m.y >= off.contentY, `${band}: ${off.year} module below the plaque`);
+  }
+  ok(Math.abs(L.totalHeight - heights[i] - openers.size * ERA_HEADER_H) < 1e-9,
+    `${band}: taller by exactly one plaque per era (${Math.round(L.totalHeight - heights[i])})`);
+
+  if (!framed) continue;
+  // boxes line up with the blocks they were reserved by, and never overlap
+  let prevEnd = -1;
+  for (const [k, box] of L.eras.entries()) {
+    const first = L.byYear.get(box.firstYear).offseason;
+    const last = L.byYear.get(box.lastYear).season;
+    ok(box.y0 === first.y0, `${band}: ${box.id} opens at its first offseason`);
+    ok(box.contentY === first.contentY, `${band}: ${box.id} content top matches the block`);
+    ok(box.contentY - box.y0 === ERA_HEADER_H, `${band}: ${box.id} carries a full plaque row`);
+    ok(box.y1 === last.y1, `${band}: ${box.id} closes on its last season`);
+    ok(box.y1 > box.contentY, `${band}: ${box.id} frames real content, not just its label`);
+    ok(box.y0 >= prevEnd, `${band}: ${box.id} disjoint from the chapter before it`);
+    prevEnd = box.y1;
+    ok(k === 0 || L.eras[k - 1].firstYear < box.firstYear, `${band}: eras in order`);
+  }
 }
-// and reachable: walking from the ends lands on the extremes
-const LAST = gesture.length - 1;
-ok(pickBand(gesture[0], LAST, gesture) === 0, "walk to most detail");
-ok(pickBand(gesture[LAST], 0, gesture) === LAST, "walk to least detail");
+
+// ---- era frame geometry + text fit (the renderer's half) ----
+// A 390px phone with the tail gutter open.
+const boxes = buildEraBoxes({ eras: eraLayouts[3].eras, width: 390, railLeft: 330 });
+ok(boxes.length === 4, "boxes built for every era");
+for (const b of boxes) {
+  ok(b.x0 === ERA_EDGE_L, `${b.id}: frame opens at the screen inset`);
+  ok(b.x1 === 330 - ERA_EDGE_R, `${b.id}: frame stops short of the tail gutter`);
+  ok(b.textX === b.x0 + ERA_TEXT_INSET, `${b.id}: text on the standard gutter`);
+  ok(b.textX > 18, `${b.id}: text clears the zoom-2 timeline stripe`);
+  ok(b.showYears, `${b.id}: dates always fit on a phone`);
+  ok(estimateTextWidth(b.labelText || "", ERA_LABEL_FS, "serif") <= b.x1 - b.textX,
+    `${b.id}: title stays inside its frame`);
+}
+ok(boxes[0].labelText === "The Founding", "a title that fits is used in full");
+ok(boxes[2].labelText === "Wilderness", "an overlong title falls back to the short form");
+ok(boxes[3].yearsText === "2012–now", "an ongoing chapter reads as ongoing");
+// no rail: the frame runs to the screen edge instead
+ok(buildEraBoxes({ eras: eraLayouts[3].eras, width: 390 })[0].x1 === 390 - ERA_EDGE_R,
+  "no tail gutter -> frame to the screen edge");
+ok(buildEraBoxes({ eras: [], width: 390 }).length === 0, "no eras -> nothing to draw");
+
+// ---- gesture heights: ordering is free now, reachability still isn't ----
+// Dropping the full-viewport page fill fixed the ORDERING (zoom 3 could
+// previously out-grow zoom 4 on a tall screen and invert the ladder). It did
+// NOT fix REACHABILITY: pickBand walks in log space with a hysteresis dead zone
+// of `hyst` ln-units around each geometric-mean boundary, so a rung is only
+// reachable when it exceeds e^(2*hyst) ≈ 1.271x its neighbour — and zoom 4 vs
+// zoom 3 lands right on that line naturally. So useTimelineViewport still feeds
+// pickBand a MIN_BAND_RATIO-corrected copy. Both halves are asserted here, with
+// Named Eras off and on (their plaque rows grow the two coarsest bands).
+const MIN_BAND_RATIO = 1.3; // mirror of useTimelineViewport's constant
+for (const [tag, hs] of [["eras off", heights], ["eras on", eraHeights]]) {
+  // raw heights: ordered, which is what the page-fill removal bought
+  for (let i = 1; i < hs.length; i++) {
+    ok(hs[i] < hs[i - 1],
+      `${tag}: raw band heights decreasing @${i} (${(hs[i - 1] / hs[i]).toFixed(2)}x)`);
+  }
+  const gesture = [...hs];
+  for (let i = gesture.length - 2; i >= 0; i--) {
+    gesture[i] = Math.max(gesture[i], gesture[i + 1] * MIN_BAND_RATIO);
+  }
+  for (let i = 1; i < gesture.length; i++) {
+    ok(gesture[i - 1] / gesture[i] > Math.exp(2 * 0.12),
+      `${tag}: corrected rung ${i} clears the hysteresis dead zone`);
+  }
+  // every band is stable: resting at its own gesture height re-picks itself
+  for (let b = 0; b < gesture.length; b++) {
+    ok(pickBand(gesture[b], b, gesture) === b, `${tag}: band ${b} stable at rest`);
+  }
+  // and reachable: walking from the ends lands on the extremes
+  const LAST = gesture.length - 1;
+  ok(pickBand(gesture[0], LAST, gesture) === 0, `${tag}: walk to most detail`);
+  ok(pickBand(gesture[LAST], 0, gesture) === LAST, `${tag}: walk to least detail`);
+}
 
 // ---- pinned stack sits at the top of the canvas and hides nothing ----
 // Content is drawn at `y + stackHeight - scrollY`, so content y=scrollY lands
@@ -189,7 +331,7 @@ const busy = [
 ok(maxStackHeight(busy) === 3 * STRIP_H, `max stack = 3 concurrent (${maxStackHeight(busy)})`);
 for (const band of MOBILE_BANDS) {
   const L = buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
-    reserveByYear: stripReserveByYear(busy), detailBand: band, pageHeight: PAGE_H });
+    reserveByYear: stripReserveByYear(busy), detailBand: band });
   const { ribbons } = buildStaffRibbons({ staff: busy, layout: L });
   for (let s = 0; s <= L.totalHeight; s += Math.max(1, Math.round(L.totalHeight / 400))) {
     const { strips, stackHeight } = resolveRibbonStrips({ ribbons, scrollY: s });
@@ -219,7 +361,7 @@ for (const band of MOBILE_BANDS) {
 // one pixel later (pinned) draw at the same viewport row.
 {
   const L = buildTimelineLayout({ seasons, modules: [draftModule], moduleData: modData,
-    reserveByYear: stripReserveByYear(busy), detailBand: "GAME_DETAIL", pageHeight: PAGE_H });
+    reserveByYear: stripReserveByYear(busy), detailBand: "GAME_DETAIL" });
   const { ribbons } = buildStaffRibbons({ staff: busy, layout: L });
   for (const r of ribbons) {
     const a = resolveRibbonStrips({ ribbons, scrollY: r.y0 });

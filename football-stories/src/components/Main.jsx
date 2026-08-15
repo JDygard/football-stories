@@ -24,6 +24,7 @@ const Main = forwardRef(function Main(
   {
     mapped,
     draftSegment,
+    erasSegment,
     settings,
     adminById,
     focusYear,
@@ -66,6 +67,12 @@ const Main = forwardRef(function Main(
   // Draft-grade lens: standard "value delivered" by default; opt-in to the
   // availability-adjusted grade (absent/false => standard).
   const adjustedGrades = settings?.availabilityAdjusted === true;
+  // Named Eras: null when switched off, so the layout stops reserving plaque
+  // rows as well as the layer stopping drawing them — one gate, not two.
+  const eras = useMemo(
+    () => (settings?.showEras === false ? null : erasSegment?.eras || null),
+    [settings?.showEras, erasSegment],
+  );
 
   // ---- interaction state ----
   // Draft classes expanded to full rows while in compact (Zoom 2) mode.
@@ -149,24 +156,13 @@ const Main = forwardRef(function Main(
     focusYear,
     onFocusConsumed,
     showPlayoffs,
+    eras,
   });
   const {
     layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY,
     railPan, scrollRef, scrollRange,
   } = viewport;
   didDragRef.current = didDrag;
-
-  // Zoom 3 ("Season by season") snaps one season page per screen: invisible
-  // page-sized snap targets ride the spacer, and the container turns on
-  // y-mandatory snapping only at that band. A page taller than the viewport
-  // (oversized draft class) scrolls freely within itself before snapping on.
-  const snapPages = useMemo(() => {
-    if (band !== "GAME_BANDS" || !layout?.byYear) return null;
-    return [...layout.byYear.values()].map(({ offseason, season }) => ({
-      top: offseason.y0,
-      height: season.y1 - offseason.y0,
-    }));
-  }, [band, layout]);
 
   // Expose the native scroll container (Header reads its scrollTop to hide/show).
   useImperativeHandle(externalRef, () => scrollRef.current, [scrollRef]);
@@ -236,26 +232,11 @@ const Main = forwardRef(function Main(
           WebkitOverflowScrolling: "touch",
           overscrollBehavior: "contain",
           touchAction: "pan-y",
-          scrollSnapType: snapPages ? "y mandatory" : undefined,
         }}
       >
         {/* Spacer giving the native scroll range = committed band height plus
             the ribbon-stack slack the timeline is pushed down by. */}
         <div style={{ height: Math.max(scrollRange, height), position: "relative" }}>
-          {snapPages?.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                position: "absolute",
-                top: p.top,
-                height: p.height,
-                left: 0,
-                right: 0,
-                scrollSnapAlign: "start",
-                pointerEvents: "none",
-              }}
-            />
-          ))}
           {ready && (
             <svg
               width={width}

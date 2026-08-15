@@ -3,6 +3,11 @@
 // renders one <svg> inside a native HORIZONTAL scroll container. The nested
 // <g> transform is the cosmetic horizontal zoom tween (career-follow pills
 // are always visible — no reveal pan on desktop).
+//
+// Vertically it's two rows: a CARD SHELF holding every open info card, and the
+// timeline below it. Mobile keeps one card at a time floating over the content;
+// here they're a list on a shelf, because the reason to open a card is usually
+// to hold it against another one.
 
 import {
   forwardRef,
@@ -26,6 +31,7 @@ const DesktopMain = forwardRef(function DesktopMain(
   {
     mapped,
     draftSegment,
+    erasSegment,
     settings,
     adminById,
     focusYear,
@@ -66,10 +72,18 @@ const DesktopMain = forwardRef(function DesktopMain(
   const showWinRate = settings?.showWinRate !== false;
   const showPlayoffs = settings?.showPlayoffs !== false;
   const adjustedGrades = settings?.availabilityAdjusted === true;
+  const showEras = settings?.showEras !== false;
+  // Named Eras: the curated narrative chapters, if this franchise has been
+  // authored yet (the segment 404s until it has) and the toggle is on.
+  const eras = showEras ? erasSegment?.eras || null : null;
 
   // ---- interaction state ----
   const [expandedDraftYears, setExpandedDraftYears] = useState(() => new Set());
-  const [selected, setSelected] = useState(null);
+  // Info cards are a LIST here, not the single selection mobile keeps: landscape
+  // has the room, and comparing two players — or a coach against the GM who
+  // hired him — is most of why you open one at all. They stack on a shelf above
+  // the timeline (see the render) and each is closed explicitly by its ×.
+  const [cards, setCards] = useState([]);
 
   // tapGuard: lets click handlers ignore the click that trails a drag.
   const didDragRef = useRef(() => false);
@@ -83,10 +97,27 @@ const DesktopMain = forwardRef(function DesktopMain(
       return next;
     });
   }, []);
-  const onSelectPick = useCallback((pick) => {
-    setSelected({ type: "player", pick });
+  // Opening the same person twice is a no-op rather than a duplicate card —
+  // re-clicking a long tenure that spans half the screen is easy to do by
+  // accident, and two identical cards would be pure noise.
+  const openCard = useCallback((card) => {
+    setCards((prev) => (prev.some((c) => c.key === card.key) ? prev : [...prev, card]));
   }, []);
-  const closeCard = useCallback(() => setSelected(null), []);
+  const closeCard = useCallback((key) => {
+    setCards((prev) => prev.filter((c) => c.key !== key));
+  }, []);
+  const closeAllCards = useCallback(() => setCards([]), []);
+
+  const onSelectPick = useCallback(
+    (pick) => {
+      openCard({
+        key: `player:${pick.player_id || `${pick.name}-${pick.year}`}`,
+        type: "player",
+        pick,
+      });
+    },
+    [openCard],
+  );
 
   const modules = useMemo(() => getEnabledDesktopModules(settings), [settings]);
   const moduleData = useMemo(
@@ -184,21 +215,86 @@ const DesktopMain = forwardRef(function DesktopMain(
             value: null,
             career: null,
           };
-        setSelected({ type: "player", pick });
+        openCard({ key: `player:${r.id}`, type: "player", pick });
       } else {
-        setSelected({ type: "staff", ribbon: r });
+        openCard({ key: `staff:${r.key}`, type: "staff", ribbon: r });
       }
     },
-    [pickById],
+    [pickById, openCard],
   );
 
   const ready = width > 0 && height > 0;
 
   return (
-    <div
-      ref={containerRef}
-      style={{ height: "100%", overflow: "hidden", position: "relative" }}
-    >
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {/* CARD SHELF — the open info cards, in the whitespace above the timeline.
+          A real layout row rather than an overlay: it takes its height from the
+          column, so the timeline simply gets what's left and its lane re-centres
+          instead of being covered up. Zero height when nothing is open.
+
+          It's also OUTSIDE containerRef on purpose — that element is what the
+          ResizeObserver measures into the SVG's width/height, so the shelf must
+          not be inside it or the timeline would size itself as if the shelf
+          weren't there.
+
+          More cards than fit scroll sideways rather than wrapping onto a second
+          row; the shelf's height is what the timeline pays for, and it should
+          stay predictable no matter how many are open. */}
+      {cards.length > 0 && (
+        <div
+          style={{
+            flexShrink: 0,
+            // Bounded twice: never more than a third of the pane, and never
+            // more than a card's worth of pixels. Cards scroll inside
+            // themselves past that, so the timeline's budget stays stable.
+            maxHeight: "min(38%, 260px)",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            padding: "10px 12px",
+            overflowX: "auto",
+            overflowY: "hidden",
+            overscrollBehavior: "contain",
+            background: "#f2f4f7",
+            borderBottom: "1px solid #dfe3ea",
+          }}
+        >
+          {cards.map((c) => (
+            <InfoCard
+              key={c.key}
+              docked
+              selection={c}
+              adminById={adminById}
+              onClose={() => closeCard(c.key)}
+              adjusted={adjustedGrades}
+            />
+          ))}
+          {cards.length > 1 && (
+            <button
+              onClick={closeAllCards}
+              style={{
+                flexShrink: 0,
+                alignSelf: "center",
+                border: "1px solid #d5dae3",
+                borderRadius: 6,
+                background: "#fff",
+                color: "#5b6472",
+                fontSize: 11.5,
+                fontWeight: 600,
+                padding: "5px 9px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Close all
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}
+      >
       {/* Native scroll container: the OS owns horizontal momentum/rubber-band.
           touch-action:pan-x reserves horizontal for the scroller; the pointer
           handlers add mouse drag-pan and tap-vs-drag tracking. */}
@@ -241,6 +337,7 @@ const DesktopMain = forwardRef(function DesktopMain(
                   band={band}
                   moduleData={moduleData}
                   staff={spans}
+                  eras={eras}
                   pre1967={mapped?.pre1967}
                   adminById={adminById}
                   onSelectStaff={onSelectRibbon}
@@ -254,8 +351,8 @@ const DesktopMain = forwardRef(function DesktopMain(
           )}
         </div>
       </div>
-      <InfoCard selection={selected} adminById={adminById} onClose={closeCard} adjusted={adjustedGrades} />
-      <DesktopZoomHud band={band} />
+        <DesktopZoomHud band={band} />
+      </div>
     </div>
   );
 });

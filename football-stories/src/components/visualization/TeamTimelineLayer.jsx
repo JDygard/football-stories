@@ -15,6 +15,8 @@ import { geometryFor } from "./detail.js";
 import { buildStaffRibbons, resolveRibbonStrips, PEEK } from "./staffRibbonModel.js";
 import StaffRibbonLayer from "./StaffRibbonLayer.jsx";
 import SeasonPage from "./SeasonPage.jsx";
+import EraLayer from "./EraLayer.jsx";
+import { buildEraBoxes } from "./eraModel.js";
 import {
   classGradeFor,
   classSummary,
@@ -489,12 +491,15 @@ const OffseasonBlock = memo(function OffseasonBlock({
       {showBanner && (
         <g style={{ pointerEvents: "none" }}>
           {/* Material "paper" surface — full interface width, softly elevated,
-              no border (separation comes from the shadow alone) */}
+              no border (separation comes from the shadow alone). Measured from
+              `contentY`, not y0, so an era plaque row at the top of the block
+              stays outside the paper (always identical today: this band draws
+              no era frames — see ERA_BANDS). */}
           <rect
             x={0}
-            y={block.y0}
+            y={block.contentY ?? block.y0}
             width={fullWidth}
-            height={block.height}
+            height={block.height - (block.eraHeaderHeight || 0)}
             fill={OFF_PAPER}
           />
 
@@ -721,6 +726,29 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
     return layout.blocks.filter((b) => b.y1 > top && b.y0 < bot);
   }, [layout, scrollY, height, vPad]);
 
+  // Named Era frames. The layout owns the y coordinates (it's the only thing
+  // that knows where it put each plaque row); this adds the x extents and the
+  // text fit, which depend on the viewport instead. Empty at every band but the
+  // two coarsest — buildTimelineLayout doesn't reserve plaque rows elsewhere,
+  // so there is nothing here to draw into.
+  //
+  // The frame stops short of the tail gutter rather than running under it: a
+  // career leaving the franchise belongs to the person, not to the chapter they
+  // are walking out of.
+  const eraBoxes = useMemo(
+    () =>
+      buildEraBoxes({
+        eras: layout?.eras,
+        width,
+        railLeft: railWidth ? railLeft : null,
+      }),
+    [layout, width, railWidth, railLeft],
+  );
+  const visibleEras = useMemo(
+    () => eraBoxes.filter((b) => b.y1 > scrollY - vPad && b.y0 < vBot),
+    [eraBoxes, scrollY, vPad, vBot],
+  );
+
   // Years with any visible block — the per-year passes (zoom-2 cards, zoom-3
   // pages) render once per year, not once per half-block.
   const visibleYears = useMemo(() => {
@@ -763,6 +791,10 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
       </linearGradient>
     </defs>
     <g transform={`translate(0, ${stackHeight - scrollY})`}>
+      {/* NAMED ERAS, pass 1 — the interior tint and the plaque's band, UNDER
+          the curve, the cards and every block. */}
+      <EraLayer boxes={visibleEras} layer="wash" />
+
       {/* all-time win-rate curve (0..1 across the content width), drawn BEHIND
           the blocks so each opaque offseason banner — and the franchise-record
           pill that rides on it — cleanly occludes the line where it passes
@@ -817,13 +849,17 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
             // edge to just left of the year.
             const dotY = (off.headerY ?? off.y0) + CARD_DOT_Y;
             const dotR = expanded ? 7 : 4;
+            // The card starts at the block's CONTENT top, not its y0: when a
+            // Named Era opens on this year the block is carrying that era's
+            // plaque row above it, and the card must not swallow it.
+            const cardTop = off.contentY ?? off.y0;
             return (
               <g key={`card-${year}`}>
                 <rect
                   x={CARD_L}
-                  y={off.y0 + 3}
+                  y={cardTop + 3}
                   width={Math.max(0, cardRight - CARD_L)}
-                  height={sea.y1 - off.y0 - 6}
+                  height={sea.y1 - cardTop - 6}
                   rx={10}
                   fill="#fff"
                   stroke={expanded ? CARD_SELECTED : CARD_STROKE}
@@ -965,6 +1001,10 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         onFollow={onFollow}
         tapGuard={tapGuard}
       />
+
+      {/* NAMED ERAS, pass 2 — the border and the label, over the ribbons and
+          everything else, each mark haloed in white. */}
+      <EraLayer boxes={visibleEras} layer="plaque" />
     </g>
 
     </>

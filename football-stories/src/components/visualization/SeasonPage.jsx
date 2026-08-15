@@ -1,5 +1,5 @@
-// One "Season by season" page (zoom 3 / GAME_BANDS): a full-viewport,
-// snap-scrolled story card for a single year, in the mockup's section order —
+// One "Season by season" page (zoom 3 / GAME_BANDS): a story card for a single
+// year, in the mockup's section order —
 //   [arriving personnel ribbons ride the reserved strip at the very top]
 //   big year + navy all-time win-rate pill
 //   REGULAR SEASON  — record line + one W/L chip per game
@@ -7,6 +7,10 @@
 //   PLAYOFFS        — finish (or "Missed Playoffs") + playoff-game chips
 // Section offsets come precomputed from buildTimelineLayout's page branch
 // (block.page / block.postseason / block.modules); this file only draws.
+//
+// "Page" is now a section layout, not a screen: these were once padded to a
+// full viewport and scroll-snapped one per screen, and both are gone — the band
+// scrolls normally and a page is exactly as tall as its own sections.
 //
 // The page paints an opaque white surface over the win-rate curve layer, so
 // the curve reads at the list-like zooms and yields to the dossier here.

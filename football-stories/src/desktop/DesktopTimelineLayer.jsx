@@ -4,16 +4,26 @@
 // components/visualization/TeamTimelineLayer.jsx.
 //
 // Two season representations by detail band:
-//   cols -> one win/loss column per game (GAME_DETAIL / GAME_BANDS): franchise
-//           green anchored at the BOTTOM (its own score share), opponent red
-//           above, split at the score ratio — so a split above the dashed
-//           midline reads "outscored them" at a glance — with an arrow tip
-//           bumping UP through the split on a win, down on a loss.
+//   rows -> a GAME LOG: a fixed-width column headed "SEASON <record>", holding
+//           one horizontal row per game stacking downward, then a POSTSEASON
+//           section beneath. Each row is franchise green from the LEFT (its own
+//           score share) against opponent red from the right, split at the score
+//           ratio, with an arrow tip bumping RIGHT through the split on a win
+//           and left on a loss. Zoom 3 shows bare bars; zoom 4 adds the
+//           "ARI 24" / "17 SEA" score plates.
 //   line -> a single season column with a vertical W-L differential bar
 //           (up = winning season, down = losing).
-// Offseason blocks are "paper" banner columns spanning the assembly (year,
-// record, division finish, point diff — mobile's season-header strip migrated
-// here, where landscape has room) and delegate to their content module
+//
+// The log is deliberately NOT transposed. Desktop rotates the TIMELINE AXIS —
+// years march left→right — but a game log is a list, and a list reads top to
+// bottom with horizontal text in every other context a reader has ever met one.
+// Rotating it into one column per game with sideways score plates made a
+// familiar object unfamiliar. So rows here are the mobile GameRow mark
+// (components/visualization/TeamTimelineLayer.jsx) placed in a column, which
+// also means the two trees now agree on what a game looks like.
+// Offseason blocks are "paper" banner columns (year, record, playoff finish,
+// division finish, point diff, all-time win-rate — mobile's season-header strip
+// migrated here, where landscape has room) and delegate to their content module
 // columns. The all-time win-rate curve runs left→right with win% on the
 // VERTICAL axis (0 at the lane bottom, 1 at the top) — like a stock chart.
 //
@@ -21,12 +31,22 @@
 // tall window; the whole assembly — entry-pill margin, lane, axis, bottom
 // personnel rail, exit-pill margin — centers vertically in the viewport.
 //
+// THREE THINGS DELIBERATELY DON'T OVERLAP, and each is worth preserving:
+//   - the win-rate PILL lives in the banner's fact stack, not out on the curve
+//     it reports (where it collided with ribbons and draft columns);
+//   - the RAIL is a full-width zone of its own that the paper columns stop
+//     short of, so personnel ribbons read as their own track;
+//   - the YEAR AXIS paints AFTER the ribbon layer, with a halo, because opaque
+//     ribbon connectors cross it on the way from the lane down into the rail.
+//
 // Desktop-only affordances: hover <title> tooltips on seasons/games (mobile
-// has no hover), and decade/half-decade axis labels at the two most
-// zoomed-out bands (a horizontal axis can't fit a label per year there).
+// has no hover), and a year axis at the banner-less band, its label step
+// derived from the layout's px-per-year (a horizontal axis can't fit a label
+// per year, and how many it CAN fit now depends on the window — see axisStep).
 
 import { memo, useMemo } from "react";
 import { desktopGeometryFor } from "./desktopDetail.js";
+import { BANNER_PAD_L, BANNER_PAD_R } from "./buildDesktopLayout.js";
 import {
   buildDesktopRibbons,
   buildPillPlan,
@@ -35,6 +55,13 @@ import {
   PILL_ROW_H,
 } from "./desktopRibbonModel.js";
 import DesktopRibbonLayer from "./DesktopRibbonLayer.jsx";
+import DesktopEraLayer from "./DesktopEraLayer.jsx";
+import {
+  buildEraBoxes,
+  ERA_HEADER_H,
+  ERA_BORDER_W,
+  ERA_RAIL_GAP,
+} from "./desktopEraModel.js";
 
 const WIN = "#2e9d51"; // victory green — winner
 const LOSS = "#d0423f"; // loss red
@@ -49,16 +76,54 @@ const PLATE_W = 38; // fixed label-plate length — uniform across every column
 const OFF_PAPER = "#fbfbfa";
 const OFF_HAIR = "#ececec";
 const OFF_YEAR = "#2e3338";
+const OFF_CHAPTER = "#c7bfaf"; // the rule that opens each year's column
 const CURVE = "#4a6fa5"; // win-rate line
+// Banner fact stack: sized to be plainly legible, not merely present. The
+// banner column (OFF_HEADER_W_* in buildDesktopLayout) is measured to hold text
+// at this size, so the two must move together.
+const FACT_FS = 11;
+const FACT_PITCH = 14;
+// The year is a HEADLINE, and a headline needs room around it, not just a big
+// font. Its gutters come from buildDesktopLayout, which measures the banner
+// column to include them. HEADLINE_GAP separates the year from the facts below,
+// so it opens the block instead of merely topping a list.
+const HEADLINE_GAP = 6;
 
-const RAIL_PAD = 10; // gap between the timeline lane and the ribbon rail
-const AXIS_H = 18; // year-axis strip under the lane (only at banner-less bands)
+// The personnel rail is its OWN ZONE, not just a gutter: a full-width tinted
+// strip with hairline edges, held clear of the lane by RAIL_PAD, and the one
+// horizontal band the offseason "paper" columns deliberately stop short of (see
+// paperBottom below). Without that separation the ribbons read as debris under
+// the timeline rather than a track in their own right.
+const RAIL_PAD = 16; // gap between the timeline lane and the ribbon rail
+const RAIL_BG = "#eceef3"; // the rail zone's own surface
+const RAIL_EDGE = "#d6dae3"; // hairlines closing the zone top and bottom
+// The year axis at the banner-less band. This is the ONLY place years appear at
+// that zoom — there is no banner column to carry them — so it has to read as a
+// dated axis in its own right: a continuous baseline, a long tick and a large
+// bold year at each labelled step, short light ticks on the years between.
+// Sparse gray captions floating under the lane did not say "timeline".
+const AXIS_H = 34; // year-axis strip under the lane (only at banner-less bands)
+const AXIS_MIN_LABEL_GAP = 52; // px between year labels before the step coarsens
+const AXIS_MIN_TICK_GAP = 9; // px between minor ticks before they're dropped
+const AXIS_RULE = "#b6bdc8";
+const AXIS_TICK_MAJOR = "#7c8492";
+const AXIS_TICK_MINOR = "#c3c9d2";
 // The lane takes only the height the content earns — never the full window
 // (a stretched full-bleed lane reads awkward on tall viewports). The whole
 // assembly (pill margin / lane / axis / rail / pill margin) centers
 // vertically in whatever remains.
 const LANE_MAX = 400;
-const LANE_MIN = 140;
+// Floor raised to clear the banner's own stack (year headline + up to four fact
+// lines + the ALL-TIME win-rate section). Below this the banner would render
+// past the bottom of its own lane on a short window.
+const LANE_MIN = 152;
+
+// NAMED ERAS ride only the two coarsest rungs. Lower down, a single era is
+// wider than the window and its frame would be two vertical lines with no
+// visible relationship — the shape only means something once the whole span
+// fits on screen. (Named Eras are the curated data layer; "Eras" the zoom
+// level is ERA_SUMMARY. See desktopEraModel.js.)
+const ERA_FRAME_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
 
 // Playoff finish -> outline color (same mapping as mobile).
 const MEDALS = [
@@ -98,123 +163,174 @@ function divisionLabel(s) {
 const toneColor = (tone) =>
   tone === "good" ? "#3f8f2e" : tone === "bad" ? "#c0492b" : "#8a857c";
 
-// One win/loss arrow COLUMN: franchise green anchored at the bottom (by its
-// own score) vs opponent red above, split by score, with an arrow-tip bump
-// marking the win/loss and a grey hairline along the boundary. Shared by
-// regular-season and postseason.
-const GameCol = memo(function GameCol({ g, x, gw, laneTop, laneBottom }) {
-  const colW = Math.max(3, gw - 2);
-  const labels = gw >= 12;
-  const laneH = Math.max(1, laneBottom - laneTop);
+// One win/loss arrow ROW: franchise green from the LEFT (its own score share)
+// against opponent red from the right, split at the score ratio, with an arrow
+// tip bumping right through the split on a win and left on a loss, and a grey
+// hairline along the boundary. Shared by regular season and postseason.
+//
+// Geometrically the mobile GameRow with the same proportions; the two trees
+// agree on what a game looks like, which is the point — see this file's header.
+const GameRow = memo(function GameRow({ g, y, rh, left, right }) {
+  const rowH = Math.max(2, rh - (rh >= 8 ? 2 : 1));
+  const cw = Math.max(1, right - left);
+  const labels = rh >= 13;
   const pf = g.points_for ?? 0;
   const pa = g.points_against ?? 0;
   const total = pf + pa || 1;
-  const splitY = laneBottom - laneH * (pf / total);
+  const splitX = left + cw * (pf / total);
   const isWin = g.result === "W";
   const isTie = g.result === "T";
   const tip = isWin
-    ? Math.min(colW, Math.max(0, splitY - laneTop))
-    : Math.min(colW, Math.max(0, laneBottom - splitY));
-  const tipY = isWin ? splitY - tip : splitY + tip;
-  const left = x - colW / 2;
-  const right = left + colW;
-  const cx = left + colW / 2;
-  // Green polygon: up the left edge to the split, out to the tip at the
-  // column's horizontal center, back down the right edge.
-  const arrow = `${left},${laneBottom} ${left},${splitY} ${cx},${tipY} ${right},${splitY} ${right},${laneBottom}`;
-  const bw = BORDER_W;
-  // Grey underlay offset toward the loser side (up), plus a bottom-edge sliver.
-  const greyArrow = `${left},${laneBottom - bw} ${left},${splitY - bw} ${cx},${tipY - bw} ${right},${splitY - bw} ${right},${laneBottom - bw}`;
-  const bgH = Math.min(colW - 3, 14); // plate thickness across the column
+    ? Math.min(rowH, Math.max(0, right - splitX))
+    : Math.min(rowH, Math.max(0, splitX - left));
+  const tipX = isWin ? splitX + tip : splitX - tip;
+  const midY = y + rowH / 2;
+  const botY = y + rowH;
+  // Green polygon: along the top edge to the split, out to the tip at the row's
+  // vertical center, back along the bottom edge.
+  const arrow = `${left},${y} ${splitX},${y} ${tipX},${midY} ${splitX},${botY} ${left},${botY}`;
+  // Grey underlay offset toward the loser side (right), plus a left-edge sliver.
+  const bw = Math.min(BORDER_W, Math.max(1, rowH / 4));
+  const greyArrow = `${left + bw},${y} ${splitX + bw},${y} ${tipX + bw},${midY} ${splitX + bw},${botY} ${left + bw},${botY}`;
+  const bgH = Math.min(rowH - 3, 14); // plate thickness down the row
+  const bgY = y + (rowH - bgH) / 2;
   return (
     <g>
-      <rect x={left} y={laneTop} width={colW} height={laneH} fill={isTie ? TIE : LOSS}>
+      <rect x={left} y={y} width={cw} height={rowH} fill={isTie ? TIE : LOSS}>
         <title>{`${g.franchise_id} ${pf}–${pa} ${g.opponent_id}${isTie ? " (T)" : isWin ? " (W)" : " (L)"}`}</title>
       </rect>
       {!isTie && (
         <g style={{ pointerEvents: "none" }}>
           <polygon points={greyArrow} fill={BORDER} />
-          <rect x={left} y={laneBottom - bw} width={colW} height={bw} fill={BORDER} />
+          <rect x={left} y={y} width={bw} height={rowH} fill={BORDER} />
           <polygon points={arrow} fill={WIN} />
         </g>
       )}
       {labels && (
         <g style={{ pointerEvents: "none" }}>
-          {/* rotated plates: franchise + score reading up from the bottom,
-              opponent + score hanging from the top */}
-          <g transform={`translate(${cx}, ${laneBottom - 4}) rotate(-90)`}>
-            <rect x={0} y={-bgH / 2} width={PLATE_W} height={bgH} rx={2} fill={TEXTBG} />
-            <text x={3} y={0.5} fontSize={9} dominantBaseline="central" fill={LABEL_FILL}>
-              {`${g.franchise_id} ${pf}`}
-            </text>
-          </g>
-          <g transform={`translate(${cx}, ${laneTop + 4}) rotate(-90)`}>
-            <rect x={-PLATE_W} y={-bgH / 2} width={PLATE_W} height={bgH} rx={2} fill={TEXTBG} />
-            <text x={-3} y={0.5} fontSize={9} textAnchor="end" dominantBaseline="central" fill={LABEL_FILL}>
-              {`${pa} ${g.opponent_id}`}
-            </text>
-          </g>
+          {/* horizontal plates: franchise + score at the left, opponent's score
+              + code at the right — read straight across, like any box score */}
+          <rect x={left + 2} y={bgY} width={PLATE_W} height={bgH} rx={2} fill={TEXTBG} />
+          <text x={left + 5} y={bgY + bgH / 2} fontSize={9} dominantBaseline="central" fill={LABEL_FILL}>
+            {`${g.franchise_id} ${pf}`}
+          </text>
+          <rect x={right - 2 - PLATE_W} y={bgY} width={PLATE_W} height={bgH} rx={2} fill={TEXTBG} />
+          <text
+            x={right - 5} y={bgY + bgH / 2}
+            fontSize={9} textAnchor="end" dominantBaseline="central" fill={LABEL_FILL}
+          >
+            {`${pa} ${g.opponent_id}`}
+          </text>
         </g>
       )}
     </g>
   );
 });
 
-// The postseason segment right of a season's games. Zoom 4: a rotated
-// "POSTSEASON" label column (medal-accented by finish) then win/loss arrow
-// columns for the playoff games. Zoom 3: a compact vertical strip that just
-// states the result, gold-bordered for a title, silver for runner-up.
-const PostseasonSection = memo(function PostseasonSection({ post, laneTop, laneBottom }) {
-  if (!post) return null;
-  const medal = playoffMedal(post.result);
+// A season as a GAME LOG column: "SEASON <record>" header, the regular-season
+// rows, then a POSTSEASON section beneath them.
+//
+// Row pitch is solved here, not in the layout engine: the nominal pitch comes
+// from the band, but a short lane shrinks it so the log stays COMPLETE. A game
+// log that silently drops December is worse than one with thinner rows — unlike
+// the draft column, where "+N more" is honest because the picks are ranked and
+// you're seeing the top of the class.
+const SeasonLog = memo(function SeasonLog({
+  block, laneTop, laneBottom, meta, medal, showPlayoffs = true,
+}) {
   const laneH = Math.max(1, laneBottom - laneTop);
-  if (post.kind === "result") {
-    const { x0, width: w, result } = post;
-    return (
-      <g style={{ pointerEvents: "none" }}>
-        <rect
-          x={x0} y={laneTop} width={w} height={laneH} rx={3}
-          fill="#fafafa" stroke={medal || "#dcdcdc"} strokeWidth={medal ? 1.75 : 1}
-        />
-        <g transform={`translate(${x0 + w / 2 + 0.5}, ${laneBottom - 8}) rotate(-90)`}>
-          <text
-            x={0} y={0} dominantBaseline="central"
-            fontSize={9} fontWeight={700} fill="#9a9a9a" style={{ letterSpacing: 1.5 }}
-          >
-            POSTSEASON
-          </text>
-          <text
-            x={laneH - 16} y={0} dominantBaseline="central" textAnchor="end"
-            fontSize={11} fontWeight={700} fill={medal ? "#2b2b2b" : "#777"}
-          >
-            {result || "—"}
-          </text>
-        </g>
-      </g>
-    );
-  }
-  const { x0, headerW, colW, result, games } = post;
+  const left = block.x0 + 3;
+  const right = block.x1 - 3;
+  const cw = Math.max(1, right - left);
+  const wide = cw >= 110; // room to spell out the section words
+
+  const reg = block.games || [];
+  const post = showPlayoffs ? block.postseason : null;
+  const postRows = post?.kind === "rows" ? post.games : [];
+  const headH = wide ? 16 : 12;
+  const postHeadH = post ? (wide ? 14 : 10) : 0;
+  const postStripH = post && post.kind === "result" ? 16 : 0;
+
+  const nRows = Math.max(1, reg.length + postRows.length);
+  const avail = laneH - headH - postHeadH - postStripH - 6;
+  const rh = Math.max(2, Math.min(block.gameRowHeight || 16, avail / nRows));
+
+  const rowsTop = laneTop + headH + 3;
+  const postTop = rowsTop + reg.length * rh + postHeadH;
+
   return (
     <g>
-      <g
-        transform={`translate(${x0 + headerW - 5}, ${laneBottom}) rotate(-90)`}
-        style={{ pointerEvents: "none" }}
-      >
-        <text x={0} y={0} fontSize={9} fontWeight={700} fill="#9a9a9a" style={{ letterSpacing: 1.5 }}>
-          POSTSEASON{result ? ` · ${result}` : ""}
+      <g style={{ pointerEvents: "none" }}>
+        {wide && (
+          <text x={left} y={laneTop + 11} fontSize={9.5} fontWeight={700} fill="#6b7280" style={{ letterSpacing: 0.7 }}>
+            SEASON
+          </text>
+        )}
+        <text
+          x={wide ? right : left}
+          y={laneTop + (wide ? 11 : 9)}
+          fontSize={wide ? 10.5 : 9}
+          fontWeight={700}
+          textAnchor={wide ? "end" : "start"}
+          fill="#4a4640"
+        >
+          {recordStr(meta || block.season?.season)}
         </text>
+        {/* medal accent: the finish colors the log's own rule, so a title year
+            is legible from the column alone */}
+        <rect
+          x={left}
+          y={laneTop + headH - 2}
+          width={cw}
+          height={medal ? 2.5 : 1}
+          fill={medal || "#e6e3dd"}
+        />
       </g>
-      <line
-        x1={x0 + headerW - 1} x2={x0 + headerW - 1} y1={laneTop} y2={laneBottom}
-        stroke={medal || "#e0e0e0"} strokeWidth={medal ? 2 : 1}
-      />
-      {games.map(({ g, i, x }) => (
-        <GameCol
-          key={g.game_id || `p-${i}`}
-          g={g} x={x} gw={colW}
-          laneTop={laneTop} laneBottom={laneBottom}
+
+      {reg.map(({ g, i }) => (
+        <GameRow
+          key={g.game_id || `${block.year}-${i}`}
+          g={g} y={rowsTop + i * rh} rh={rh} left={left} right={right}
         />
       ))}
+
+      {post && (
+        <g>
+          <g style={{ pointerEvents: "none" }}>
+            <text
+              x={left}
+              y={postTop - 4}
+              fontSize={8.5}
+              fontWeight={700}
+              fill={medal ? "#6b6357" : "#9ca3af"}
+              style={{ letterSpacing: 0.7 }}
+            >
+              {wide ? `POSTSEASON${post.result ? ` · ${post.result}` : ""}` : "PLAYOFFS"}
+            </text>
+          </g>
+          {postRows.map(({ g, i }) => (
+            <GameRow
+              key={g.game_id || `${block.year}-p${i}`}
+              g={g} y={postTop + i * rh} rh={rh} left={left} right={right}
+            />
+          ))}
+          {post.kind === "result" && (
+            <g style={{ pointerEvents: "none" }}>
+              <rect
+                x={left} y={postTop} width={cw} height={14} rx={3}
+                fill="#fafafa" stroke={medal || "#dcdcdc"} strokeWidth={medal ? 1.75 : 1}
+              />
+              <text
+                x={left + 5} y={postTop + 7.5}
+                fontSize={9.5} fontWeight={700} dominantBaseline="middle"
+                fill={medal ? "#2b2b2b" : "#777"}
+              >
+                {post.result || "—"}
+              </text>
+            </g>
+          )}
+        </g>
+      )}
     </g>
   );
 });
@@ -222,19 +338,16 @@ const PostseasonSection = memo(function PostseasonSection({ post, laneTop, laneB
 const SeasonBlock = memo(function SeasonBlock({ block, laneTop, laneBottom, meta, showPlayoffs = true }) {
   const raw = block.season?.season || {};
 
-  if (block.mode === "cols") {
-    const gw = block.gameColWidth;
+  if (block.mode === "rows") {
     return (
-      <g>
-        {block.games.map(({ g, i, x }) => (
-          <GameCol
-            key={g.game_id || `${block.year}-${i}`}
-            g={g} x={x} gw={gw}
-            laneTop={laneTop} laneBottom={laneBottom}
-          />
-        ))}
-        <PostseasonSection post={block.postseason} laneTop={laneTop} laneBottom={laneBottom} />
-      </g>
+      <SeasonLog
+        block={block}
+        laneTop={laneTop}
+        laneBottom={laneBottom}
+        meta={meta}
+        medal={showPlayoffs ? playoffMedal(raw.playoffs) : null}
+        showPlayoffs={showPlayoffs}
+      />
     );
   }
 
@@ -251,8 +364,12 @@ const SeasonBlock = memo(function SeasonBlock({ block, laneTop, laneBottom, meta
   const y0 = diff >= 0 ? midY - barH : midY;
   const color = diff >= 0 ? WIN : LOSS;
   const medal = showPlayoffs ? playoffMedal(raw.playoffs) : null;
-  const frameW = Math.max(4, Math.min(block.width - 1, 12));
-  const barW = Math.min(6, Math.max(2, block.width - 2));
+  // Both scale WITH the column instead of sitting at a fixed few px: season
+  // columns are no longer one width (Eras fits itself to the viewport, Seasons
+  // is far wider than it was), and a hairline bar centered in a wide empty
+  // column reads as a rendering bug rather than a deliberate mark.
+  const frameW = Math.max(4, Math.min(block.width - 2, 22));
+  const barW = Math.max(2, Math.min(14, block.width * 0.42));
   const tip = `${block.year} · ${recordStr(meta || raw)}${showPlayoffs && raw.playoffs ? ` · ${raw.playoffs}` : ""}`;
   return (
     <g>
@@ -278,10 +395,21 @@ const SeasonBlock = memo(function SeasonBlock({ block, laneTop, laneBottom, meta
   );
 });
 
-// The offseason banner COLUMN: a full-bleed-vertical Material "paper" surface
-// (zooms 2/3/4), fronted by the minimalist sans year at the top, the season's
-// record / division finish / point diff beneath it (migrated from mobile's
-// season-header strip), and the all-time win-rate pill riding the curve.
+// The offseason banner COLUMN: a Material "paper" surface (zooms 2/3/4)
+// spanning the pill margin, lane and axis — but NOT the personnel rail, which
+// is the ribbons' own zone — fronted by the minimalist sans year at the top and
+// the season's facts stacked beneath it: record, playoff finish, division
+// finish, point diff (migrated from mobile's season-header strip), then the
+// all-time win-rate pill and raw all-time record.
+//
+// The win-rate pill is the last row of that stack rather than a floating chip
+// on the win-rate curve. Riding the curve put it at an unpredictable height
+// somewhere out in the lane, where it fought the personnel ribbons crossing
+// beneath it and the draft column beside it, and where consecutive years could
+// stack their pills on top of each other. In the stack it has a fixed slot that
+// by construction collides with nothing; the curve still runs through the lane,
+// and the pill's caret still reports which way it moved.
+//
 // Content modules (draft, …) stack to the right.
 const OffseasonBlock = memo(function OffseasonBlock({
   block,
@@ -302,8 +430,13 @@ const OffseasonBlock = memo(function OffseasonBlock({
   const headerW = block.headerWidth || 0;
   const laneH = Math.max(1, laneBottom - laneTop);
   const big = offMode === "full";
-  const yearSize = big ? 24 : 19;
-  const yearY = laneTop + (big ? 24 : 20);
+  const yearSize = big ? 27 : 24;
+  const yearY = laneTop + (big ? 28 : 26);
+  // Left edge of every element in the banner stack, and the usable width once
+  // both gutters are taken out. Everything is sized against innerW, so nothing
+  // spills over the hairline into the draft column.
+  const textX = block.x0 + BANNER_PAD_L;
+  const innerW = Math.max(0, headerW - BANNER_PAD_L - BANNER_PAD_R);
 
   // Facts stack under the year — record, playoff finish, division, point diff.
   const lines = [];
@@ -324,41 +457,53 @@ const OffseasonBlock = memo(function OffseasonBlock({
       });
     }
   }
+  const factsTop = yearY + HEADLINE_GAP + FACT_PITCH;
+  const factsBottom = factsTop + lines.length * FACT_PITCH;
 
-  // Overall winrate pill, centered on the height where the all-time win-rate
-  // curve crosses this year boundary. "<##>% (<w>/<l>)" with a trend caret;
-  // falls back to the bare percentage when the block is too narrow. Hidden at
-  // zoom 4 (GAME_DETAIL), where games are the focus.
+  // Overall win-rate: the last section of the fact stack (see this component's
+  // header for why it no longer rides the curve). A small "ALL-TIME" label, the
+  // percentage pill with its trend caret, then the raw cumulative record.
+  //
+  // The label is what disambiguates the section: two lines above sits the
+  // SEASON's record ("9-7"), so an unlabelled "180-300" underneath reads as
+  // another season stat. Labelling it also lets both numbers stay short enough
+  // to fit the column, which an inline "180-300 all-time" suffix did not.
+  // Hidden at zoom 4 (GAME_DETAIL), where individual games are the focus.
   let win = null;
-  if (showWinRate && showBanner && detailBand !== "GAME_DETAIL" && meta && meta.enterPct != null) {
-    const fs = big ? 11 : 10;
-    const pct = Math.round(meta.enterPct * 100);
-    const caretW = fs * 0.62;
-    const gap = 4;
-    const mk = (label) => {
-      const textW = Math.round(label.length * fs * 0.52);
-      return { label, w: caretW + gap + textW + 16 };
+  if (
+    showWinRate &&
+    showBanner &&
+    headerW > 0 &&
+    detailBand !== "GAME_DETAIL" &&
+    meta &&
+    meta.enterPct != null
+  ) {
+    const fs = 11.5;
+    const label = `${Math.round(meta.enterPct * 100)}%`;
+    const dir =
+      meta.prevPct == null
+        ? 0
+        : meta.enterPct > meta.prevPct
+          ? 1
+          : meta.enterPct < meta.prevPct
+            ? -1
+            : 0;
+    const caretW = dir ? 7 : 0;
+    const gap = dir ? 4 : 0;
+    const w = Math.min(
+      innerW,
+      9 + caretW + gap + Math.round(label.length * fs * 0.6) + 9,
+    );
+    win = {
+      fs,
+      label,
+      dir,
+      caretW,
+      gap,
+      w,
+      h: 18,
+      record: `${meta.enterWins}-${meta.enterLosses}`,
     };
-    let p = mk(`${pct}% (${meta.enterWins}/${meta.enterLosses})`);
-    if (p.w > block.width - 4) p = mk(`${pct}%`);
-    if (p.w <= block.width - 4) {
-      const ph = 18;
-      const curveY = laneBottom - meta.enterPct * laneH;
-      const cy = Math.max(laneTop + ph, Math.min(laneBottom - ph, curveY));
-      const cx = Math.max(
-        block.x0 + p.w / 2 + 2,
-        Math.min(block.x1 - p.w / 2 - 2, block.x0 + block.width / 2),
-      );
-      const dir =
-        meta.prevPct == null
-          ? 0
-          : meta.enterPct > meta.prevPct
-            ? 1
-            : meta.enterPct < meta.prevPct
-              ? -1
-              : 0;
-      win = { fs, label: p.label, w: p.w, ph, cx, cy, caretW, gap, dir };
-    }
   }
 
   return (
@@ -371,10 +516,18 @@ const OffseasonBlock = memo(function OffseasonBlock({
 
           {headerW > 0 && (
             <g>
-              {/* the year — top of the banner column, horizontal (never
-                  rotated: it's the primary landmark) */}
+              {/* CHAPTER RULE — the vertical bar that opens each year's column,
+                  running the full height of its paper. Paired with the drop
+                  shadow already falling off the column's right edge, it closes
+                  the year into a block of its own: the eye reads "new year"
+                  before it reads the digits. Without it the timeline was one
+                  unbroken horizontal run and every year ran into the last. */}
+              <rect x={block.x0} y={paperTop} width={2.5} height={paperBottom - paperTop} fill={OFF_CHAPTER} />
+
+              {/* the year — the headline, horizontal (never rotated: it's the
+                  primary landmark), set in from the chapter rule */}
               <text
-                x={block.x0 + 6}
+                x={textX}
                 y={yearY}
                 fontSize={yearSize}
                 fontWeight={600}
@@ -388,9 +541,9 @@ const OffseasonBlock = memo(function OffseasonBlock({
               {lines.map((l, i) => (
                 <text
                   key={i}
-                  x={block.x0 + 7}
-                  y={yearY + 17 + i * 13}
-                  fontSize={10}
+                  x={textX}
+                  y={factsTop + i * FACT_PITCH}
+                  fontSize={FACT_FS}
                   fontWeight={l.weight}
                   fill={l.color}
                   style={{ letterSpacing: 0.2 }}
@@ -399,22 +552,34 @@ const OffseasonBlock = memo(function OffseasonBlock({
                 </text>
               ))}
 
-              {/* overall winrate pill riding the curve crossing */}
+              {/* all-time win-rate: last section of the fact stack */}
               {win && (() => {
-                const innerLeft = win.cx - win.w / 2 + 8;
-                const caretLeft = innerLeft;
-                const textX = innerLeft + win.caretW + win.gap;
+                const px = textX;
+                const py = factsBottom + 13;
+                const cy = py + win.h / 2;
+                const caretLeft = px + 9;
+                const labelX = caretLeft + win.caretW + win.gap;
                 const ch = win.caretW * 0.92;
-                const up = `${caretLeft},${win.cy + ch / 2} ${caretLeft + win.caretW},${win.cy + ch / 2} ${caretLeft + win.caretW / 2},${win.cy - ch / 2}`;
-                const down = `${caretLeft},${win.cy - ch / 2} ${caretLeft + win.caretW},${win.cy - ch / 2} ${caretLeft + win.caretW / 2},${win.cy + ch / 2}`;
+                const up = `${caretLeft},${cy + ch / 2} ${caretLeft + win.caretW},${cy + ch / 2} ${caretLeft + win.caretW / 2},${cy - ch / 2}`;
+                const down = `${caretLeft},${cy - ch / 2} ${caretLeft + win.caretW},${cy - ch / 2} ${caretLeft + win.caretW / 2},${cy + ch / 2}`;
                 return (
                   <g>
+                    <text
+                      x={px}
+                      y={factsBottom + 9}
+                      fontSize={8.5}
+                      fontWeight={700}
+                      fill="#a8a29a"
+                      style={{ letterSpacing: 0.7 }}
+                    >
+                      ALL-TIME
+                    </text>
                     <rect
-                      x={win.cx - win.w / 2}
-                      y={win.cy - win.ph / 2}
+                      x={px}
+                      y={py}
                       width={win.w}
-                      height={win.ph}
-                      rx={win.ph / 2}
+                      height={win.h}
+                      rx={win.h / 2}
                       fill={CURVE}
                     />
                     {win.dir !== 0 && (
@@ -427,8 +592,8 @@ const OffseasonBlock = memo(function OffseasonBlock({
                       />
                     )}
                     <text
-                      x={win.dir !== 0 ? textX : win.cx}
-                      y={win.cy}
+                      x={win.dir !== 0 ? labelX : px + win.w / 2}
+                      y={cy}
                       fontSize={win.fs}
                       fontWeight={600}
                       textAnchor={win.dir !== 0 ? "start" : "middle"}
@@ -436,6 +601,16 @@ const OffseasonBlock = memo(function OffseasonBlock({
                       fill="#ffffff"
                     >
                       {win.label}
+                    </text>
+                    <text
+                      x={px}
+                      y={py + win.h + 12}
+                      fontSize={9.5}
+                      fontWeight={600}
+                      fill="#9a958c"
+                      style={{ letterSpacing: 0.2 }}
+                    >
+                      {win.record}
                     </text>
                   </g>
                 );
@@ -477,6 +652,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   band,
   moduleData = {},
   staff = [],
+  eras = null,
   pre1967 = null,
   adminById,
   onSelectStaff,
@@ -494,37 +670,81 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
     [ribbonLayout],
   );
 
-  // Vertical composition (top → bottom): entry-pill margin -> timeline lane
-  // -> year axis (banner-less bands only) -> bottom rail (personnel bands)
-  // -> peek + exit-pill margin. The lane is capped at LANE_MAX — height is
-  // spent only on what the content uses — and the whole assembly centers in
-  // the viewport.
+  // Vertical composition (top → bottom): entry-pill margin -> ERA PLAQUE (when
+  // Named Eras are on) -> timeline lane -> year axis (banner-less bands only)
+  // -> bottom rail (personnel bands) -> peek + exit-pill margin. The lane is
+  // capped at LANE_MAX — height is spent only on what the content uses — and
+  // the whole assembly centers in the viewport.
+  //
+  // NOTE THE PILL MARGIN'S POSITION. With eras on it sits ABOVE the plaque, so
+  // an arriving coach/GM/player enters the era frame from OUTSIDE it, the way
+  // a person arrives into a chapter rather than starting inside one. With eras
+  // off it sits where it always did, directly above the lane — the whole
+  // reorder is conditional so the game zooms are untouched.
+  const eraBoxes = useMemo(
+    () => (eras?.length ? buildEraBoxes({ eras, layout }) : []),
+    [eras, layout],
+  );
+  const showEras = eraBoxes.length > 0 && ERA_FRAME_BANDS.has(band);
+
   const offMode = desktopGeometryFor(band).offseason;
   const railH = ribbonLayout.railHeight;
   const topZone = pillPlan.entryRows ? pillPlan.entryRows * PILL_ROW_H + 6 : 10;
   const axisH = offMode === "hidden" ? AXIS_H : 0;
   const railBlock = railH ? RAIL_PAD + railH : 0;
+  // The era header strip is a REAL ROW in the assembly, not an overlay: it buys
+  // its height from the same budget as everything else, so era titles sit above
+  // the timeline instead of on top of it.
+  const eraZoneH = showEras ? ERA_HEADER_H : 0;
   const botZone = railH
     ? PEEK + (pillPlan.exitRows ? pillPlan.exitRows * PILL_ROW_H + 6 : 8)
     : 8;
-  const fixedH = topZone + axisH + railBlock + botZone;
+  const fixedH = eraZoneH + topZone + axisH + railBlock + botZone;
   const laneH = Math.max(LANE_MIN, Math.min(LANE_MAX, height - 16 - fixedH));
   const assemblyH = fixedH + laneH;
   const assemblyTop = Math.max(8, (height - assemblyH) * 0.45);
   const assemblyBottom = assemblyTop + assemblyH;
-  const laneTop = assemblyTop + topZone;
+  // Everything below the plaque hangs off contentTop — that's what keeps the
+  // year columns clear of the era titles.
+  const eraTop = assemblyTop + (showEras ? topZone : 0);
+  const contentTop = eraTop + eraZoneH;
+  const laneTop = showEras ? contentTop : contentTop + topZone;
   const laneBottom = laneTop + laneH;
   const railTop = laneBottom + axisH + (railH ? RAIL_PAD : 0);
   const railBottom = railTop + railH;
+  // The rail's own zone: a tinted full-width strip from half the pad above the
+  // top band down past the peek, so exit connectors are visibly LEAVING it.
+  const railZone = railH
+    ? { top: railTop - RAIL_PAD / 2, bottom: railBottom + PEEK + 4 }
+    : null;
+  // Offseason paper stops above that zone. The rail is the one horizontal band
+  // that belongs to the personnel ribbons alone; running year columns through
+  // it is what made the ribbons read as clutter under the timeline instead of a
+  // track of their own.
+  const paperBottom = railZone ? railZone.top - 3 : assemblyBottom;
+  // WHERE A CHAPTER ENDS. Not at the paper's edge: it runs on down through the
+  // rail, past the bottom of the last tenure BAND, so the people who served in
+  // an era are inside its frame. It stops just below them rather than at the
+  // rail zone's own bottom edge, because what lies further down is the peek and
+  // the exit pills — a career LEAVING, which belongs to the person and not to
+  // the chapter they're walking out of.
+  //
+  // ERA_RAIL_GAP is CLEAR SPACE, so the stroke width is added on top: the
+  // border is centred on this line, and it's the stroke's near edge that has to
+  // clear the bands, not its centre.
+  const eraBottom = railH ? railBottom + ERA_RAIL_GAP + ERA_BORDER_W : paperBottom;
   // Pill row centers: entry rows stack upward from the lane, exit rows
   // downward from the rail's peek.
-  const entryPillY = (row) => laneTop - 10 - PILL_H / 2 - row * PILL_ROW_H;
+  // Entry pills stack upward from whatever the ribbons are arriving INTO: the
+  // top of the era frame when there is one, the lane itself otherwise.
+  const pillFloor = showEras ? eraTop : laneTop;
+  const entryPillY = (row) => pillFloor - 10 - PILL_H / 2 - row * PILL_ROW_H;
   const exitPillY = (row) => railBottom + PEEK + 4 + PILL_H / 2 + row * PILL_ROW_H;
 
-  // Cumulative franchise winrate AFTER EACH GAME, spanning the entire
-  // timeline width. x comes from the layout (true game columns at Zoom 3/4;
-  // games spread evenly through the season block at Zoom 1/2); the win% maps
-  // to the VERTICAL axis — so the curve survives every band change.
+  // Cumulative franchise winrate AFTER EACH GAME, spanning the entire timeline
+  // width: a season's games spread evenly across its block, and the win% maps
+  // to the VERTICAL axis — so the curve keeps per-game resolution and survives
+  // every band change.
   const winCurve = useMemo(() => {
     if (!layout?.blocks?.length) return null;
     // Seed with pre-1967 aggregate W-L-T so the curve starts at the
@@ -543,11 +763,10 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         n += 1;
         if (g.result === "W") w += 1;
         else if (g.result === "T") t += 1;
-        const x =
-          b.mode === "cols"
-            ? seq[idx].x
-            : b.x0 + ((idx + 0.5) / m) * b.width;
-        pts.push([x, (w + t / 2) / n]);
+        // No game owns an x of its own any more — a game is a ROW inside the
+        // season's column — so spread the season's games evenly across the
+        // block. The curve stays smooth and keeps its per-game resolution.
+        pts.push([b.x0 + ((idx + 0.5) / m) * b.width, (w + t / 2) / n]);
       });
     }
     return pts.length ? pts : null;
@@ -608,9 +827,20 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
 
   if (!layout || !width || !height) return null;
 
-  // Axis label pitch at banner-less bands: a horizontal axis can't fit every
-  // year, so step to half-decades / decades.
-  const axisStep = band === "FRANCHISE_OVERVIEW" ? 10 : 5;
+  // Axis label pitch at banner-less bands: a horizontal axis can't fit a label
+  // per year, so coarsen the step until neighbouring labels clear
+  // AXIS_MIN_LABEL_GAP. Derived from the actual layout rather than hardcoded
+  // per band, because the Eras band now sizes itself to the viewport — how many
+  // years fit legibly depends on the window and on how much room the ribbon
+  // reserve took, neither of which a constant can know.
+  const pxPerYear = layout.yearsSpan ? layout.totalWidth / layout.yearsSpan : 0;
+  const axisStep =
+    [1, 2, 5, 10, 25, 50].find((s) => s * pxPerYear >= AXIS_MIN_LABEL_GAP) || 50;
+  // Minor ticks subdivide the labelled step — the finest interval that still
+  // leaves the ticks apart enough to count. null when even the coarsest
+  // subdivision would crowd, in which case the axis is majors only.
+  const axisMinorStep =
+    [1, 2, 5, 10].find((s) => s < axisStep && s * pxPerYear >= AXIS_MIN_TICK_GAP) || null;
 
   return (
     <>
@@ -649,6 +879,19 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         </g>
       )}
 
+      {/* NAMED ERAS, pass 1 — the interior tint and the plaque's band, UNDER
+          everything: year columns, win-rate curve, rail, ribbons. Barely-there
+          on purpose: enough to see where one chapter ends and the next begins,
+          not enough to tint the content. */}
+      {showEras && (
+        <DesktopEraLayer
+          boxes={eraBoxes}
+          top={eraTop}
+          bottom={eraBottom}
+          layer="wash"
+        />
+      )}
+
       {visible.map((b) =>
         b.type === "season" ? (
           <SeasonBlock
@@ -665,8 +908,8 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
             block={b}
             laneTop={laneTop}
             laneBottom={laneBottom}
-            paperTop={assemblyTop}
-            paperBottom={assemblyBottom}
+            paperTop={contentTop}
+            paperBottom={paperBottom}
             offMode={offMode}
             detailBand={band}
             moduleData={moduleData}
@@ -686,32 +929,38 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
             <rect
               key={`osh-${b.year}`}
               x={b.x1}
-              y={assemblyTop}
+              y={contentTop}
               width={6}
-              height={assemblyH}
+              height={Math.max(0, paperBottom - contentTop)}
               fill="url(#offPaperShadowH)"
               style={{ pointerEvents: "none" }}
             />
           ))}
 
-      {/* year axis only at the most-zoomed-out bands; otherwise the banner
-          column left of each season carries the (much bigger) year */}
-      {offMode === "hidden" &&
-        visible
-          .filter((b) => b.type === "season" && b.year % axisStep === 0)
-          .map((b) => (
-            <text
-              key={`y-${b.year}`}
-              x={b.x0 + b.width / 2}
-              y={laneBottom + 13}
-              fontSize={10}
-              textAnchor="middle"
-              fill="#555"
-              style={{ pointerEvents: "none" }}
-            >
-              {b.year}
-            </text>
-          ))}
+      {/* The personnel rail's own zone — a full-width surface the year columns
+          stop short of, so the ribbons read as a track rather than as clutter
+          under the timeline. Drawn before the ribbons; they sit on it. */}
+      {railZone && (
+        <g style={{ pointerEvents: "none" }}>
+          <rect
+            x={0}
+            y={railZone.top}
+            width={layout.totalWidth}
+            height={railZone.bottom - railZone.top}
+            fill={RAIL_BG}
+          />
+          <line
+            x1={0} x2={layout.totalWidth}
+            y1={railZone.top + 0.5} y2={railZone.top + 0.5}
+            stroke={RAIL_EDGE} strokeWidth={1}
+          />
+          <line
+            x1={0} x2={layout.totalWidth}
+            y1={railZone.bottom - 0.5} y2={railZone.bottom - 0.5}
+            stroke={RAIL_EDGE} strokeWidth={1}
+          />
+        </g>
+      )}
 
       {/* personnel tenure ribbons: entry connector in from the top pill
           zone, band along the bottom rail, exit connector down through the
@@ -732,6 +981,93 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         onFollow={onFollow}
         tapGuard={tapGuard}
       />
+
+      {/* NAMED ERAS, pass 2 — the border and the label, over the ribbons and
+          haloed. Both need it: the frame's bottom now encloses the rail's
+          OPAQUE tenure bands, so a border painted under them would break at
+          every chapter boundary a tenure crosses; and incoming ribbons enter
+          from ABOVE and drop through the plaque band, so a connector painted
+          over a title strikes it clean through. Same call, same reason, as the
+          year axis below. */}
+      {showEras && (
+        <DesktopEraLayer
+          boxes={eraBoxes}
+          top={eraTop}
+          bottom={eraBottom}
+          layer="plaque"
+        />
+      )}
+
+      {/* YEAR AXIS — banner-less band only; elsewhere the column left of each
+          season carries the (much bigger) year.
+
+          A real dated axis: a baseline running the whole timeline, minor ticks
+          on the intervening years, and a long tick under a large bold year at
+          each labelled step.
+
+          Drawn LAST, after the ribbon layer, every mark carrying a white halo.
+          Ribbon connectors are opaque and cross exactly this strip on their way
+          between the lane and the rail, so painting the axis under them buried
+          the years; painting it over them, haloed, is what keeps the axis
+          readable no matter how busy the personnel are. The halo is also what
+          lets the baseline cross a connector and still read as one line. */}
+      {offMode === "hidden" && (
+        <g style={{ pointerEvents: "none" }}>
+          <line
+            x1={0} x2={layout.totalWidth}
+            y1={laneBottom + 0.5} y2={laneBottom + 0.5}
+            stroke="#ffffff" strokeWidth={3.5}
+          />
+          <line
+            x1={0} x2={layout.totalWidth}
+            y1={laneBottom + 0.5} y2={laneBottom + 0.5}
+            stroke={AXIS_RULE} strokeWidth={1}
+          />
+          {axisMinorStep &&
+            visible
+              .filter(
+                (b) =>
+                  b.type === "season" &&
+                  b.year % axisMinorStep === 0 &&
+                  b.year % axisStep !== 0,
+              )
+              .map((b) => {
+                const cx = b.x0 + b.width / 2;
+                return (
+                  <g key={`ym-${b.year}`}>
+                    <line x1={cx} x2={cx} y1={laneBottom} y2={laneBottom + 5} stroke="#ffffff" strokeWidth={3.5} />
+                    <line x1={cx} x2={cx} y1={laneBottom} y2={laneBottom + 5} stroke={AXIS_TICK_MINOR} strokeWidth={1} />
+                  </g>
+                );
+              })}
+          {visible
+            .filter((b) => b.type === "season" && b.year % axisStep === 0)
+            .map((b) => {
+              const cx = b.x0 + b.width / 2;
+              return (
+                <g key={`y-${b.year}`}>
+                  <line x1={cx} x2={cx} y1={laneBottom} y2={laneBottom + 10} stroke="#ffffff" strokeWidth={4.5} />
+                  <line x1={cx} x2={cx} y1={laneBottom} y2={laneBottom + 10} stroke={AXIS_TICK_MAJOR} strokeWidth={1.5} />
+                  <text
+                    x={cx}
+                    y={laneBottom + 25}
+                    fontSize={15}
+                    fontWeight={700}
+                    textAnchor="middle"
+                    fill={OFF_YEAR}
+                    stroke="#ffffff"
+                    strokeWidth={3.5}
+                    strokeLinejoin="round"
+                    paintOrder="stroke"
+                    style={{ letterSpacing: -0.2 }}
+                  >
+                    {b.year}
+                  </text>
+                </g>
+              );
+            })}
+        </g>
+      )}
     </g>
     </>
   );

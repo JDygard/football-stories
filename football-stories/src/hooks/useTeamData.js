@@ -6,6 +6,7 @@ export default function useTeamData(teamId) {
   const [loading, setLoading] = useState(false);
   const [teamSegment, setTeamSegment] = useState(null);
   const [draftSegment, setDraftSegment] = useState(null);
+  const [erasSegment, setErasSegment] = useState(null);
   const [error, setError] = useState(null);
   const [adminById, setAdminById] = useState(() => new Map());
 
@@ -54,6 +55,29 @@ export default function useTeamData(teamId) {
       })
       .catch(() => {
         if (!cancelled) setDraftSegment(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId]);
+
+  // Named Eras segment (hand-curated narrative eras — see dataset_generation/
+  // eras.py). Same 404-tolerant contract as the draft segment, and for the same
+  // reason squared: eras are authored one franchise at a time, so most teams
+  // legitimately have no file and the timeline just renders without them.
+  useEffect(() => {
+    if (!teamId) return;
+    let cancelled = false;
+    setErasSegment(null);
+
+    fetch(`/data/segments/teams_eras/${teamId}.json`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!cancelled) setErasSegment(json);
+      })
+      .catch(() => {
+        if (!cancelled) setErasSegment(null);
       });
 
     return () => {
@@ -132,6 +156,7 @@ export default function useTeamData(teamId) {
     error,
     teamSegment,
     draftSegment,
+    erasSegment,
     mapped,
     performanceLeft,
     performanceRight,

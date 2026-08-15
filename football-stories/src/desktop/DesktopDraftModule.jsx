@@ -5,10 +5,11 @@
 //
 // Interactions (all guarded by data.tapGuard so a pan's trailing click is
 // ignored):
-//   - compact mode: the class is a narrow vertical chip strip; tap to expand
-//     it to full rows (reflows the content stack). Tap the background of an
-//     expanded class to collapse it again.
-//   - any pick row: tap to open the player info card (data.onSelectPick).
+//   - compact mode: the class is a labeled column of named grade boxes; tap to
+//     expand it to full rows (pick number, position, score bar — reflows the
+//     content stack). Tap the background of an expanded class to collapse it.
+//   - any pick row OR named grade box: tap to open the player info card
+//     (data.onSelectPick).
 //
 // Landscape-only nuance: a column's row count is bounded by the lane height,
 // so an oversized class (12-round drafts ran 30+ picks) clamps its rows and
@@ -17,6 +18,9 @@
 import {
   HEADER_ROW_H,
   PICK_ROW_H,
+  COMPACT_HEADER_H,
+  COMPACT_ROW_H,
+  COMPACT_GAP,
   tierColor,
   tierTextColor,
   picksForYear,
@@ -25,6 +29,7 @@ import {
   classSummary,
   gradeOf,
   pickLabel,
+  shortName,
   truncate,
   measureDraftDesktop,
 } from "./desktopDraftModel.js";
@@ -159,28 +164,120 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
   );
 }
 
-// Compact: a narrow vertical strip of tier-colored squares (one per pick),
-// top pick first — the rotated sibling of mobile's chip row.
-function CompactChips({ picks, x, width, y, height, adjusted }) {
+// Compact (zoom 2): a LABELED column — "DRAFT" plus the class grade, then one
+// tier-colored box per pick with the player's name inside it, top pick first.
+//
+// The name is what makes the grade mean anything: a column of anonymous colored
+// squares tells you a class graded out well without telling you it was a draft
+// class or whose it was. Each box is its own tap target into the player card,
+// so the compact view is navigable without expanding first.
+function CompactClass({ picks, x, width, y, height, grade, adjusted, onSelectPick }) {
   const n = picks.length;
   if (!n) return null;
-  const avail = height - 8;
-  const gap = 2;
-  const sq = Math.max(4, Math.min(12, avail / n - gap));
-  const w = Math.min(width - 4, sq);
+
+  const boxX = x + 4;
+  const boxW = Math.max(8, width - 8);
+  const headY = y + 4;
+  const rowsTop = headY + COMPACT_HEADER_H;
+  const pitch = COMPACT_ROW_H + COMPACT_GAP;
+
+  // Clamp to the lane, closing with "+N more" — same budget rule the expanded
+  // rows use, so toggling never overflows the lane in either direction.
+  const maxRows = Math.max(1, Math.floor((height - (rowsTop - y) - 4) / pitch));
+  const clamped = n > maxRows;
+  const shown = clamped ? picks.slice(0, maxRows - 1) : picks;
+  // ~5.4px per char at fontSize 9.5, less the tier letter's gutter on the right.
+  const nameMax = Math.max(3, Math.floor((boxW - 22) / 5.4));
+
   return (
-    <g transform={`translate(${x + (width - w) / 2}, ${y + 4})`} style={{ pointerEvents: "none" }}>
-      {picks.map((p, i) => (
-        <rect
-          key={p.player_id || i}
-          x={0}
-          y={i * (sq + gap)}
-          width={w}
-          height={sq}
-          rx={1}
-          fill={tierColor(gradeOf(p.value, adjusted).tier)}
-        />
-      ))}
+    <g>
+      <g style={{ pointerEvents: "none" }}>
+        <text x={boxX} y={headY + 11} fontSize={9.5} fontWeight={700} fill="#6b7280" style={{ letterSpacing: 0.7 }}>
+          DRAFT
+        </text>
+        {grade && (
+          <g>
+            <rect x={boxX + 40} y={headY + 1} width={20} height={12} rx={2} fill={tierColor(grade.tier)} />
+            <text
+              x={boxX + 50}
+              y={headY + 7.5}
+              fontSize={8.5}
+              fontWeight={700}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={tierTextColor(grade.tier)}
+            >
+              {grade.tier}
+              {grade.provisional ? "*" : ""}
+            </text>
+          </g>
+        )}
+        <text x={boxX + boxW} y={headY + 11} fontSize={9} textAnchor="end" fill="#9ca3af">
+          {n}
+        </text>
+      </g>
+
+      {shown.map((p, i) => {
+        const g = gradeOf(p.value, adjusted);
+        const color = tierColor(g.tier);
+        const fg = g.tier ? tierTextColor(g.tier) : "#4b5563";
+        const rowY = rowsTop + i * pitch;
+        const midY = rowY + COMPACT_ROW_H / 2;
+        return (
+          <g
+            key={p.player_id || `${i}`}
+            onClick={onSelectPick ? onSelectPick(p) : undefined}
+            style={onSelectPick ? { cursor: "pointer" } : undefined}
+          >
+            <rect x={boxX} y={rowY} width={boxW} height={COMPACT_ROW_H} rx={2} fill={color}>
+              <title>
+                {`${p.name || "Unknown"}${p.position ? ` · ${p.position}` : ""} · ${pickLabel(p)}${g.tier ? ` · ${g.tier}` : ""}`}
+              </title>
+            </rect>
+            <text
+              x={boxX + 5}
+              y={midY}
+              dominantBaseline="middle"
+              fontSize={9.5}
+              fontWeight={600}
+              fill={fg}
+              style={{ pointerEvents: "none" }}
+            >
+              {truncate(shortName(p.name), nameMax)}
+            </text>
+            {g.tier && (
+              <text
+                x={boxX + boxW - 4}
+                y={midY}
+                dominantBaseline="middle"
+                textAnchor="end"
+                fontSize={8.5}
+                fontWeight={700}
+                fill={fg}
+                opacity={0.75}
+                style={{ pointerEvents: "none" }}
+              >
+                {g.tier}
+                {g.provisional ? "*" : ""}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {clamped && (
+        <text
+          x={boxX}
+          y={rowsTop + shown.length * pitch + COMPACT_ROW_H / 2}
+          dominantBaseline="middle"
+          fontSize={9}
+          fontStyle="italic"
+          fill="#9ca3af"
+          style={{ pointerEvents: "none" }}
+        >
+          +{n - shown.length} more
+        </text>
+      )}
     </g>
   );
 }
@@ -228,7 +325,20 @@ function renderDraft({ year, x, width, y, height, mode, data }) {
       {/* Keyed by mode so the fade replays when the class actually toggles. */}
       {!expanded ? (
         <g key="chips" className="draft-reveal">
-          <CompactChips picks={picks} x={x} width={width} y={y} height={height} adjusted={adjusted} />
+          <CompactClass
+            picks={picks}
+            x={x}
+            width={width}
+            y={y}
+            height={height}
+            grade={grade}
+            adjusted={adjusted}
+            onSelectPick={
+              typeof data.onSelectPick === "function"
+                ? (p) => guarded(() => data.onSelectPick(p))
+                : null
+            }
+          />
         </g>
       ) : (
         <g key="rows" className="draft-reveal">
