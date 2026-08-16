@@ -9,7 +9,8 @@ import { buildTimelineLayout } from "../src/components/visualization/buildTimeli
 import { DETAIL_BANDS, MOBILE_BANDS, ZOOM_LABELS, geometryFor } from "../src/components/visualization/detail.js";
 import {
   buildEraBoxes, eraSpans, eraTone, estimateTextWidth,
-  ERA_BANDS, ERA_HEADER_H, ERA_TEXT_INSET, ERA_EDGE_L, ERA_EDGE_R,
+  ERA_BANDS, ERA_FRAMED_BANDS, ERA_HEADER_H, ERA_FOOT_H,
+  ERA_TEXT_INSET, ERA_EDGE_L, ERA_EDGE_R,
   ERA_LABEL_FS, ERA_TONE_COUNT,
 } from "../src/components/visualization/eraModel.js";
 import { measureDraft, COMPACT_H, PICK_ROW_H, HEADER_H, BOTTOM_PAD } from "../src/components/visualization/offseason/draftModel.js";
@@ -66,8 +67,8 @@ const reserveByYear = stripReserveByYear(staff);
 const eras = [
   { id: "founding", label: "The Founding", short: "Founding", start: 1985, end: 1994 },
   { id: "the-run", label: "The Long Run", short: "Run", start: 1995, end: 1999 },
-  { id: "wilderness", label: "An Extravagantly Overlong Chapter Title", short: "Wilderness",
-    start: 2004, end: 2009 },
+  { id: "wilderness", label: "An Extravagantly Overlong Chapter Title Nobody Would Author",
+    short: "Wilderness", start: 2004, end: 2009 },
   { id: "now", label: "The Modern Era", start: 2012, end: null },
 ];
 
@@ -212,10 +213,18 @@ for (let i = 1; i < spans.length; i++) ok(spans[i].tone !== spans[i - 1].tone, `
 ok(eraTone(0).border !== eraTone(1).border, "tones are visually distinct");
 ok(eraTone(ERA_TONE_COUNT).wash === eraTone(0).wash, "tone palette wraps");
 
+// Season by season shows the headers with no box, so it reserves plaque rows
+// but no closing feet; the two coarsest rungs do both; Every Game does neither.
+ok(ERA_BANDS.has("GAME_BANDS") && !ERA_FRAMED_BANDS.has("GAME_BANDS"),
+  "Season by season: era headers, no frame");
+ok(!ERA_BANDS.has("GAME_DETAIL"), "Every Game shows no eras at all");
+for (const b of ERA_FRAMED_BANDS) ok(ERA_BANDS.has(b), `${b}: framed implies shown`);
+
 for (const [i, L] of eraLayouts.entries()) {
   const band = MOBILE_BANDS[i];
-  const framed = ERA_BANDS.has(band);
-  ok(L.eras.length === (framed ? 4 : 0), `${band}: ${framed ? "frames its eras" : "draws no frames"}`);
+  const shown = ERA_BANDS.has(band);
+  const framed = ERA_FRAMED_BANDS.has(band);
+  ok(L.eras.length === (shown ? 4 : 0), `${band}: ${shown ? "reserves its eras" : "shows no eras"}`);
 
   // the stack stays CONTIGUOUS with plaque rows in it — tToY/yToYear (and the
   // zoom anchor that calls them) would otherwise land in a hole
@@ -228,10 +237,13 @@ for (const [i, L] of eraLayouts.entries()) {
     ok(Math.abs(L.yToYear(L.tToY(t)) - t) < 1e-6, `${band}+eras: t roundtrip ${t}`);
   }
 
-  // exactly the era-opening years carry a plaque row, and it is the only thing
-  // that grew: the band is taller by exactly one header per era
-  const openers = new Set(framed ? spans.map((e) => e.firstYear) : []);
-  for (const { offseason: off } of L.byYear.values()) {
+  // exactly the era-opening years carry a plaque row and exactly the closing
+  // years carry the foot, and those are the ONLY things that grew: the band is
+  // taller by one plaque + one foot per era, nothing else moved
+  const openers = new Set(shown ? spans.map((e) => e.firstYear) : []);
+  // only a FRAMED band buys the closing foot — no border, nothing to clear
+  const closers = new Set(framed ? spans.map((e) => e.lastYear) : []);
+  for (const { offseason: off, season: sea } of L.byYear.values()) {
     const want = openers.has(off.year) ? ERA_HEADER_H : 0;
     ok(off.eraHeaderHeight === want, `${band}: ${off.year} plaque row = ${want}`);
     ok(off.contentY === off.y0 + want, `${band}: ${off.year} content starts under the plaque`);
@@ -239,11 +251,19 @@ for (const [i, L] of eraLayouts.entries()) {
     ok(off.headerY >= off.contentY - 1e-9, `${band}: ${off.year} year header below the plaque`);
     ok(off.ribbonTop >= off.contentY - 1e-9, `${band}: ${off.year} arrivals below the plaque`);
     for (const m of off.modules) ok(m.y >= off.contentY, `${band}: ${off.year} module below the plaque`);
-  }
-  ok(Math.abs(L.totalHeight - heights[i] - openers.size * ERA_HEADER_H) < 1e-9,
-    `${band}: taller by exactly one plaque per era (${Math.round(L.totalHeight - heights[i])})`);
 
-  if (!framed) continue;
+    const foot = closers.has(sea.year) ? ERA_FOOT_H : 0;
+    ok(sea.eraFootHeight === foot, `${band}: ${sea.year} closing clear space = ${foot}`);
+    ok(sea.contentY1 === sea.y1 - foot, `${band}: ${sea.year} content ends above the foot`);
+    ok(sea.height - sea.contentHeight === foot, `${band}: ${sea.year} foot is the whole difference`);
+    // the foot pads the FRAME, it must not push the season's own marks down
+    for (const g of sea.games) ok(g.y <= sea.contentY1, `${band}: ${sea.year} games stay above the foot`);
+  }
+  ok(Math.abs(L.totalHeight - heights[i]
+      - openers.size * ERA_HEADER_H - closers.size * ERA_FOOT_H) < 1e-9,
+    `${band}: taller by exactly its plaques + feet (${Math.round(L.totalHeight - heights[i])})`);
+
+  if (!shown) continue;
   // boxes line up with the blocks they were reserved by, and never overlap
   let prevEnd = -1;
   for (const [k, box] of L.eras.entries()) {
@@ -253,6 +273,8 @@ for (const [i, L] of eraLayouts.entries()) {
     ok(box.contentY === first.contentY, `${band}: ${box.id} content top matches the block`);
     ok(box.contentY - box.y0 === ERA_HEADER_H, `${band}: ${box.id} carries a full plaque row`);
     ok(box.y1 === last.y1, `${band}: ${box.id} closes on its last season`);
+    ok(box.y1 - last.contentY1 === (framed ? ERA_FOOT_H : 0),
+      `${band}: ${box.id} clears the last season by the foot iff it has a border`);
     ok(box.y1 > box.contentY, `${band}: ${box.id} frames real content, not just its label`);
     ok(box.y0 >= prevEnd, `${band}: ${box.id} disjoint from the chapter before it`);
     prevEnd = box.y1;
@@ -261,12 +283,18 @@ for (const [i, L] of eraLayouts.entries()) {
 }
 
 // ---- era frame geometry + text fit (the renderer's half) ----
-// A 390px phone with the tail gutter open.
-const boxes = buildEraBoxes({ eras: eraLayouts[3].eras, width: 390, railLeft: 330 });
+// A 390px phone with a personnel rail: tails occupy [330, 387] and the 3px PEEK
+// sliver past them exposes departing careers.
+const RAIL_NEAR = 330, RAIL_FAR = 387;
+const boxes = buildEraBoxes({ eras: eraLayouts[3].eras, width: 390, railRight: RAIL_FAR });
 ok(boxes.length === 4, "boxes built for every era");
 for (const b of boxes) {
   ok(b.x0 === ERA_EDGE_L, `${b.id}: frame opens at the screen inset`);
-  ok(b.x1 === 330 - ERA_EDGE_R, `${b.id}: frame stops short of the tail gutter`);
+  // the tails are people WITH the team, so the chapter encloses them…
+  ok(b.x1 === RAIL_FAR, `${b.id}: frame runs out through the tail gutter`);
+  ok(b.x1 > RAIL_NEAR, `${b.id}: vertical tails are inside the chapter`);
+  // …but the peek past the gutter, where a career leaves, stays outside
+  ok(b.x1 < 390, `${b.id}: the leaving stub stays outside the chapter`);
   ok(b.textX === b.x0 + ERA_TEXT_INSET, `${b.id}: text on the standard gutter`);
   ok(b.textX > 18, `${b.id}: text clears the zoom-2 timeline stripe`);
   ok(b.showYears, `${b.id}: dates always fit on a phone`);
@@ -275,10 +303,31 @@ for (const b of boxes) {
 }
 ok(boxes[0].labelText === "The Founding", "a title that fits is used in full");
 ok(boxes[2].labelText === "Wilderness", "an overlong title falls back to the short form");
+// every real IND chapter name fits at full length on a 390px phone once the
+// frame runs out through the rail — the fallback is a safety net, not a norm
+for (const label of ["The Bert Jones Renaissance", "Finding a Home in Indianapolis",
+  "The Peyton Manning Era", "The Quarterback Carousel"]) {
+  ok(estimateTextWidth(label, ERA_LABEL_FS, "serif") <= RAIL_FAR - (ERA_EDGE_L + ERA_TEXT_INSET) - 12,
+    `real chapter name fits in full: ${label}`);
+}
 ok(boxes[3].yearsText === "2012–now", "an ongoing chapter reads as ongoing");
-// no rail: the frame runs to the screen edge instead
+// no rail (every personnel track toggled off): nothing to enclose, so the frame
+// falls back to a plain inset from the screen edge
 ok(buildEraBoxes({ eras: eraLayouts[3].eras, width: 390 })[0].x1 === 390 - ERA_EDGE_R,
-  "no tail gutter -> frame to the screen edge");
+  "no tail gutter -> frame insets from the screen edge");
+
+// UNFRAMED band (Season by season): the plaque has no border to hang its gutter
+// off, so it lines up with the page's own left margin instead of the inset
+const PAGE_LEFT = 14; // contentLeft at GAME_BANDS in TeamTimelineLayer
+const bare = buildEraBoxes({
+  eras: eraLayouts[1].eras, width: 390, railRight: RAIL_FAR, textLeft: PAGE_LEFT,
+});
+ok(bare.length === 4, "Season by season still gets a box per era to label");
+for (const b of bare) {
+  ok(b.textX === PAGE_LEFT, `${b.id}: unframed plaque aligns with the page margin`);
+  ok(b.labelText, `${b.id}: unframed plaque still carries its title`);
+}
+ok(bare[0].textX !== boxes[0].textX, "framed and unframed gutters really do differ");
 ok(buildEraBoxes({ eras: [], width: 390 }).length === 0, "no eras -> nothing to draw");
 
 // ---- gesture heights: ordering is free now, reachability still isn't ----

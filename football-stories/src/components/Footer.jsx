@@ -19,6 +19,7 @@ export default function Footer({
   draftSegment,
   ribbonConfig,
   onRibbonConfigChange,
+  onFocusYear,
   settings,
   onSettingsChange,
 }) {
@@ -73,6 +74,7 @@ export default function Footer({
             draftSegment={draftSegment}
             config={ribbonConfig}
             onChange={onRibbonConfigChange}
+            onFocusYear={onFocusYear}
           />
         )}
       </div>

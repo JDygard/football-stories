@@ -15,8 +15,8 @@ import {
 } from "../src/desktop/desktopDraftModel.js";
 import { pickBand } from "../src/hooks/zoomMath.js";
 import {
-  buildEraBoxes, eraYearsLabel, estimateTextWidth,
-  ERA_LABEL_FS, ERA_YEARS_FS, ERA_TEXT_INSET,
+  buildEraBoxes, eraYearsLabel, eraRecordLabel, estimateTextWidth,
+  ERA_LABEL_FS, ERA_YEARS_FS, ERA_TEXT_INSET, ERA_LABEL_BASELINE,
 } from "../src/desktop/desktopEraModel.js";
 
 // Viewport width the fit-mode (Eras) assertions reason about.
@@ -372,10 +372,14 @@ const eraLayout = buildDesktopLayout({
   detailBand: "ERA_SUMMARY", fitWidth: VIEWPORT_W,
 });
 const eraRows = [
-  { id: "early", label: "The Early Years", short: "Early", start: 1990, end: 1999 },
-  { id: "one", label: "The Long Name Of A Single Lost Season", short: "Lost", start: 2003, end: 2003 },
-  { id: "nano", label: "Another Very Long Name For One Season", start: 2006, end: 2006 },
-  { id: "late", label: "The Modern Era", start: 2010, end: null, ongoing: true },
+  { id: "early", label: "The Early Years", short: "Early", start: 1990, end: 1999,
+    record: { wins: 84, losses: 76, ties: 0 } },
+  { id: "one", label: "The Long Name Of A Single Lost Season", short: "Lost", start: 2003, end: 2003,
+    record: { wins: 11, losses: 5, ties: 0 } },
+  { id: "nano", label: "Another Very Long Name For One Season", start: 2006, end: 2006,
+    record: { wins: 4, losses: 12, ties: 0 } },
+  { id: "late", label: "The Modern Era", start: 2010, end: null, ongoing: true,
+    record: { wins: 90, losses: 69, ties: 1 } },
   { id: "ghost", label: "Before The Data", start: 1950, end: 1960 },
 ];
 const eraBoxes = buildEraBoxes({ eras: eraRows, layout: eraLayout });
@@ -460,6 +464,60 @@ for (const b of [...eraBoxes, ...eraBoxes2]) {
   }
   if (b.showYears) ok(b.yearsX === b.textX, `${b.id} years share the gutter`);
 }
+// ---- the record line ----
+// Ties are punctuated only when they exist, matching recordStr() in the
+// timeline layer — every modern chapter would otherwise carry a bare "-0".
+ok(eraRecordLabel({ record: { wins: 84, losses: 76, ties: 0 } }) === "84-76",
+  "a tieless record reads W-L");
+ok(eraRecordLabel({ record: { wins: 43, losses: 113, ties: 4 } }) === "43-113-4",
+  "a record with ties reads W-L-T");
+ok(eraRecordLabel({}) === "", "no record, no line");
+ok(byId.early.recordText === "84-76" && byId.early.showRecord,
+  "a wide frame shows its record");
+// Inline with the title where the pair fits; its own line only when it can't.
+ok(byId.early.recordInline, "a wide frame puts the record beside the title");
+ok(byId.early.recordX > byId.early.labelX,
+  "an inline record sits to the RIGHT of the title");
+ok(byId.early.recordBaseline === ERA_LABEL_BASELINE,
+  "an inline record shares the title's baseline");
+// An inline record must clear the REAL glyphs of the title, not the optimistic
+// fit estimate — placing it off the tight measure printed it through the tail
+// of "Grant's Twilight". The placement measure is the pessimistic one.
+ok(estimateTextWidth("Grant's Twilight", ERA_LABEL_FS, "serifWide") >
+   estimateTextWidth("Grant's Twilight", ERA_LABEL_FS, "serif"),
+  "the placement measure is wider than the fit measure");
+for (const b of [...eraBoxes, ...eraBoxes2]) {
+  if (!b.recordInline) continue;
+  const titleEnd =
+    b.labelX + estimateTextWidth(b.labelText, ERA_LABEL_FS, "serifWide");
+  ok(b.recordX >= titleEnd, `${b.id} inline record clears the title's glyphs`);
+  ok(b.recordX + estimateTextWidth(b.recordText, 12.5, "sans") <= b.x1,
+    `${b.id} inline record still lands inside the frame`);
+}
+{
+  // A frame just wide enough for its title but not for title + record.
+  const tight = buildEraBoxes({
+    eras: [{ id: "tight", label: "The Early Years", start: 1990, end: 1993,
+             record: { wins: 30, losses: 34, ties: 0 } }],
+    layout: eraLayout2,
+  })[0];
+  if (tight?.showRecord && !tight.recordInline) {
+    ok(tight.recordX === tight.textX, "a stacked record returns to the gutter");
+    ok(tight.recordBaseline > ERA_LABEL_BASELINE, "…on the line below the title");
+  }
+}
+ok(byId.late.recordText === "90-69-1", "the ongoing era carries its ties");
+// The record captions the TITLE, so a frame with no name doesn't get one — a
+// bare number under a date range reads as a stray figure.
+ok(byId.nano.labelText === null && !byId.nano.showRecord,
+  "a nameless frame shows no record either");
+// …and it hangs off the same gutter as everything else.
+for (const b of [...eraBoxes, ...eraBoxes2]) {
+  if (b.showRecord && !b.recordInline) {
+    ok(b.recordX === b.textX, `${b.id} stacked record shares the gutter`);
+  }
+}
+
 // The width estimate is per-character, not per-glyph-count: a string of narrow
 // letters must measure narrower than the same number of wide ones, or short
 // chapter names get dropped from frames they comfortably fit.

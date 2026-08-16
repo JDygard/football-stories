@@ -14,6 +14,12 @@
 //              EVERYTHING, including the personnel ribbons, with every mark
 //              haloed in white.
 //
+// On an UNFRAMED band (`framed={false}` — see ERA_FRAMED_BANDS) the caller skips
+// the wash pass entirely and the plaque drops its border, leaving just the
+// lettering in its chapter's colour: a title card you scroll past, not a
+// container. It needs no surface of its own there, because the season page
+// beneath it already paints one.
+//
 // Why the border is in the OVER pass: a chapter encloses the ribbon layer's
 // opaque entry bands, and a border painted under them would break wherever a
 // tenure crossed a chapter boundary — which is exactly where you most want to
@@ -48,7 +54,7 @@ const LABEL_FAMILY = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
 
 const BORDER_W = ERA_BORDER_W;
 
-const EraLayer = memo(function EraLayer({ boxes, layer = "wash" }) {
+const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }) {
   if (!boxes?.length) return null;
 
   // ---- pass 1: interior tint + plaque band, under everything ----
@@ -72,7 +78,12 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash" }) {
               {/* The plaque band, in the same pass: nothing in the timeline
                   reaches up into it (the block's own content starts exactly
                   where it ends), so it only has to sit above the wash. Its
-                  LABEL is another matter — that goes in the over pass. */}
+                  LABEL is another matter — that goes in the over pass.
+                  Deliberately UNRULED at its lower edge: the band is a shade of
+                  the chapter's own tint against that chapter's own wash, and a
+                  line across it turned the label into a titlebar sitting on the
+                  seasons rather than a caption floating above them. The change
+                  in tone is all the separation it needs. */}
               <rect
                 x={b.x0}
                 y={b.y0}
@@ -80,15 +91,6 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash" }) {
                 height={ERA_HEADER_H}
                 data-era-header={b.id}
                 fill={t.header}
-              />
-              <line
-                x1={b.x0}
-                x2={b.x1}
-                y1={b.y0 + ERA_HEADER_H - 0.5}
-                y2={b.y0 + ERA_HEADER_H - 0.5}
-                stroke={t.border}
-                strokeWidth={1}
-                strokeOpacity={0.5}
               />
             </g>
           );
@@ -110,18 +112,21 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash" }) {
             <g key={`frame-${b.id}`}>
               {/* The frame itself, over the content it encloses — including the
                   ribbon layer's opaque bands. Unfilled: the wash pass already
-                  laid the tint down underneath. */}
-              <rect
-                x={b.x0 + BORDER_W / 2}
-                y={b.y0 + BORDER_W / 2}
-                width={Math.max(0, b.width - BORDER_W)}
-                height={Math.max(0, h - BORDER_W)}
-                data-era-frame={b.id}
-                rx={8}
-                fill="none"
-                stroke={t.border}
-                strokeWidth={BORDER_W}
-              />
+                  laid the tint down underneath. Absent on unframed bands, where
+                  the plaque stands on its own (see ERA_FRAMED_BANDS). */}
+              {framed && (
+                <rect
+                  x={b.x0 + BORDER_W / 2}
+                  y={b.y0 + BORDER_W / 2}
+                  width={Math.max(0, b.width - BORDER_W)}
+                  height={Math.max(0, h - BORDER_W)}
+                  data-era-frame={b.id}
+                  rx={8}
+                  fill="none"
+                  stroke={t.border}
+                  strokeWidth={BORDER_W}
+                />
+              )}
               {b.showYears && (
                 <text
                   x={b.textX}

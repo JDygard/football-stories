@@ -62,11 +62,18 @@ import {
   ERA_BORDER_W,
   ERA_RAIL_GAP,
 } from "./desktopEraModel.js";
+import {
+  buildSuperBowlCrowns, crownedYears, medalFrameWidth, CROWN_ZONE,
+} from "./desktopCrownModel.js";
+import DesktopCrownLayer from "./DesktopCrownLayer.jsx";
 
-const WIN = "#2e9d51"; // victory green — winner
-const LOSS = "#d0423f"; // loss red
-const TIE = "#b9bdc4"; // neutral gray — tie
-const BORDER = "#d9d9d9"; // hairline separator between the win/loss colors
+import { RESULT, TREND, CURVE as CURVE_TOKENS, playoffMedal } from "../palette.js";
+
+// Red and green are RESERVED for results (see palette.js).
+const WIN = RESULT.WIN;
+const LOSS = RESULT.LOSS;
+const TIE = RESULT.TIE;
+const BORDER = RESULT.BORDER; // hairline separator between the win/loss colors
 const BORDER_W = 2; // px the grey underlay is offset toward the loser
 const TEXTBG = "#d0d0d0"; // silver label backdrop
 const LABEL_FILL = "#1a1a1a";
@@ -77,7 +84,7 @@ const OFF_PAPER = "#fbfbfa";
 const OFF_HAIR = "#ececec";
 const OFF_YEAR = "#2e3338";
 const OFF_CHAPTER = "#c7bfaf"; // the rule that opens each year's column
-const CURVE = "#4a6fa5"; // win-rate line
+const CURVE = CURVE_TOKENS.desktop; // win-rate line
 // Banner fact stack: sized to be plainly legible, not merely present. The
 // banner column (OFF_HEADER_W_* in buildDesktopLayout) is measured to hold text
 // at this size, so the two must move together.
@@ -125,22 +132,16 @@ const LANE_MIN = 152;
 // level is ERA_SUMMARY. See desktopEraModel.js.)
 const ERA_FRAME_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
 
-// Playoff finish -> outline color (same mapping as mobile).
-const MEDALS = [
-  [/won (sb|super|champ)/i, "#d4af37"], // gold — won it all
-  [/lost (sb|super)/i, "#b9bec7"], // silver — lost the big one
-  [/lost conf|lost champ/i, "#8d99ae"], // steel — lost conference
-  [/lost div/i, "#cd7f32"], // bronze — lost divisional
-  [/lost wc/i, "#2b2b2b"], // black — lost wild card
-];
+// The bands where a Super Bowl becomes a CROWN. Deliberately its own set rather
+// than a reference to ERA_FRAME_BANDS, which happens to hold the same two names
+// today for an unrelated reason: these are the LINE-mode zooms, where a season
+// is a single column and a playoff finish would otherwise be nothing but the
+// shade of its outline. The row-mode zooms already spell the finish out in the
+// game log, so they need no crown.
+const CROWN_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
 
-function playoffMedal(playoffs) {
-  if (!playoffs) return null;
-  for (const [re, color] of MEDALS) {
-    if (re.test(playoffs)) return color;
-  }
-  return null;
-}
+// Playoff finish -> outline color: gold / silver / steel / bronze / black.
+// The table and its matcher live in palette.js, shared with the mobile tree.
 
 function recordStr(m) {
   if (!m) return "";
@@ -161,7 +162,7 @@ function divisionLabel(s) {
 }
 
 const toneColor = (tone) =>
-  tone === "good" ? "#3f8f2e" : tone === "bad" ? "#c0492b" : "#8a857c";
+  tone === "good" ? TREND.GOOD : tone === "bad" ? TREND.BAD : TREND.NEUTRAL;
 
 // One win/loss arrow ROW: franchise green from the LEFT (its own score share)
 // against opponent red from the right, split at the score ratio, with an arrow
@@ -335,7 +336,9 @@ const SeasonLog = memo(function SeasonLog({
   );
 });
 
-const SeasonBlock = memo(function SeasonBlock({ block, laneTop, laneBottom, meta, showPlayoffs = true }) {
+const SeasonBlock = memo(function SeasonBlock({
+  block, laneTop, laneBottom, meta, showPlayoffs = true, crowned = false,
+}) {
   const raw = block.season?.season || {};
 
   if (block.mode === "rows") {
@@ -363,12 +366,15 @@ const SeasonBlock = memo(function SeasonBlock({ block, laneTop, laneBottom, meta
   const barH = Math.min(laneH / 2, Math.abs(diff) * unit);
   const y0 = diff >= 0 ? midY - barH : midY;
   const color = diff >= 0 ? WIN : LOSS;
-  const medal = showPlayoffs ? playoffMedal(raw.playoffs) : null;
+  // A crowned season (a Super Bowl at a line-mode zoom) does NOT draw its frame
+  // here: the crown draws the same frame taller, breaking up out of the lane,
+  // and two frames on one column would double-stroke it.
+  const medal = showPlayoffs && !crowned ? playoffMedal(raw.playoffs) : null;
   // Both scale WITH the column instead of sitting at a fixed few px: season
   // columns are no longer one width (Eras fits itself to the viewport, Seasons
   // is far wider than it was), and a hairline bar centered in a wide empty
   // column reads as a rendering bug rather than a deliberate mark.
-  const frameW = Math.max(4, Math.min(block.width - 2, 22));
+  const frameW = medalFrameWidth(block);
   const barW = Math.max(2, Math.min(14, block.width * 0.42));
   const tip = `${block.year} · ${recordStr(meta || raw)}${showPlayoffs && raw.playoffs ? ` · ${raw.playoffs}` : ""}`;
   return (
@@ -444,7 +450,7 @@ const OffseasonBlock = memo(function OffseasonBlock({
     lines.push({ text: recordStr(meta), color: "#4a4640", weight: 700 });
     if (showPlayoffs && meta.playoffs) {
       const medal = playoffMedal(meta.playoffs);
-      lines.push({ text: meta.playoffs, color: medal || "#8a857c", weight: 700 });
+      lines.push({ text: meta.playoffs, color: medal || TREND.NEUTRAL, weight: 700 });
     }
     const df = divisionLabel(meta.divisionFinish);
     if (df) lines.push({ text: df.text, color: toneColor(df.tone), weight: 600 });
@@ -452,7 +458,7 @@ const OffseasonBlock = memo(function OffseasonBlock({
       const pd = meta.pointDiff;
       lines.push({
         text: pd > 0 ? `+${pd}` : `${pd}`,
-        color: pd > 0 ? "#3f8f2e" : pd < 0 ? "#c0492b" : "#8a857c",
+        color: pd > 0 ? TREND.GOOD : pd < 0 ? TREND.BAD : TREND.NEUTRAL,
         weight: 700,
       });
     }
@@ -585,7 +591,7 @@ const OffseasonBlock = memo(function OffseasonBlock({
                     {win.dir !== 0 && (
                       <polygon
                         points={win.dir > 0 ? up : down}
-                        fill={win.dir > 0 ? "#4ade80" : "#ff6b6b"}
+                        fill={win.dir > 0 ? TREND.UP : TREND.DOWN}
                         stroke="#ffffff"
                         strokeWidth={0.75}
                         strokeLinejoin="round"
@@ -687,6 +693,19 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   );
   const showEras = eraBoxes.length > 0 && ERA_FRAME_BANDS.has(band);
 
+  // Super Bowl crowns. Built off the FULL block list, not `visible`, so a
+  // merged run keeps its shape while it scrolls in from off-screen — deciding
+  // that two titles are back-to-back must not depend on which of them the
+  // viewport currently holds.
+  const crowns = useMemo(
+    () =>
+      CROWN_BANDS.has(band)
+        ? buildSuperBowlCrowns({ blocks: layout?.blocks, showPlayoffs })
+        : [],
+    [band, layout, showPlayoffs],
+  );
+  const crowned = useMemo(() => crownedYears(crowns), [crowns]);
+
   const offMode = desktopGeometryFor(band).offseason;
   const railH = ribbonLayout.railHeight;
   const topZone = pillPlan.entryRows ? pillPlan.entryRows * PILL_ROW_H + 6 : 10;
@@ -696,10 +715,18 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   // its height from the same budget as everything else, so era titles sit above
   // the timeline instead of on top of it.
   const eraZoneH = showEras ? ERA_HEADER_H : 0;
+  // A crown rises CROWN_ZONE above the lane. With eras on that fits inside the
+  // header band's own bottom air — the band is 132 tall and its text stops at
+  // the record baseline (92), so the crown costs NOTHING there and the timeline
+  // does not shift when a franchise happens to have won one. With eras off
+  // there is no band to borrow from, so it buys its own row like everything
+  // else in this assembly. sims/desktop_crown.sim.mjs asserts the header case
+  // actually clears the record line.
+  const crownZoneH = crowns.length && !showEras ? CROWN_ZONE : 0;
   const botZone = railH
     ? PEEK + (pillPlan.exitRows ? pillPlan.exitRows * PILL_ROW_H + 6 : 8)
     : 8;
-  const fixedH = eraZoneH + topZone + axisH + railBlock + botZone;
+  const fixedH = eraZoneH + crownZoneH + topZone + axisH + railBlock + botZone;
   const laneH = Math.max(LANE_MIN, Math.min(LANE_MAX, height - 16 - fixedH));
   const assemblyH = fixedH + laneH;
   const assemblyTop = Math.max(8, (height - assemblyH) * 0.45);
@@ -708,7 +735,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   // year columns clear of the era titles.
   const eraTop = assemblyTop + (showEras ? topZone : 0);
   const contentTop = eraTop + eraZoneH;
-  const laneTop = showEras ? contentTop : contentTop + topZone;
+  const laneTop = showEras ? contentTop : contentTop + topZone + crownZoneH;
   const laneBottom = laneTop + laneH;
   const railTop = laneBottom + axisH + (railH ? RAIL_PAD : 0);
   const railBottom = railTop + railH;
@@ -892,6 +919,15 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         />
       )}
 
+      {/* SUPER BOWL CROWNS, pass 1 — the gold wash inside a title's frame,
+          under the columns and everything that crosses them. */}
+      <DesktopCrownLayer
+        crowns={crowns}
+        laneTop={laneTop}
+        laneBottom={laneBottom}
+        layer="wash"
+      />
+
       {visible.map((b) =>
         b.type === "season" ? (
           <SeasonBlock
@@ -901,6 +937,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
             laneBottom={laneBottom}
             meta={seasonMeta.get(b.year)}
             showPlayoffs={showPlayoffs}
+            crowned={crowned.has(b.year)}
           />
         ) : (
           <OffseasonBlock
@@ -997,6 +1034,18 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
           layer="plaque"
         />
       )}
+
+      {/* SUPER BOWL CROWNS, pass 2 — the frame's outline and the plaque, over
+          everything and haloed, for the same reason the era plaque and the year
+          axis are: ribbons drop through this exact band on their way to the
+          rail. Painted AFTER the era plaque, so where a title lands on a
+          chapter boundary the crown wins and the border passes behind it. */}
+      <DesktopCrownLayer
+        crowns={crowns}
+        laneTop={laneTop}
+        laneBottom={laneBottom}
+        layer="crown"
+      />
 
       {/* YEAR AXIS — banner-less band only; elsewhere the column left of each
           season carries the (much bigger) year.

@@ -16,6 +16,7 @@
 // the curve reads at the list-like zooms and yields to the dossier here.
 
 import { memo } from "react";
+import { RESULT, TREND, playoffMedal } from "../../palette.js";
 
 const PAGE_BG = "#ffffff";
 const HAIR = "#e7e4dd";
@@ -25,27 +26,14 @@ const MUTED = "#8a8f98";
 const NAVY_PILL = "#2c4f8f";
 
 // W/L chips — vivid fills with a darker border of the same hue (mockup).
+// Red and green are RESERVED for results; see palette.js.
 const CHIP = {
-  W: { fill: "#2e9d51", stroke: "#20713a" },
-  L: { fill: "#d0423f", stroke: "#9c322f" },
-  T: { fill: "#b9bdc4", stroke: "#8f959d" },
+  W: { fill: RESULT.WIN, stroke: RESULT.WIN_STROKE },
+  L: { fill: RESULT.LOSS, stroke: RESULT.LOSS_STROKE },
+  T: { fill: RESULT.TIE, stroke: RESULT.TIE_STROKE },
 };
 
-// Playoff finish -> accent color (same mapping as the timeline layer).
-const MEDALS = [
-  [/won (sb|super|champ)/i, "#d4af37"],
-  [/lost (sb|super)/i, "#b9bec7"],
-  [/lost conf|lost champ/i, "#8d99ae"],
-  [/lost div/i, "#cd7f32"],
-  [/lost wc/i, "#2b2b2b"],
-];
-function playoffMedal(playoffs) {
-  if (!playoffs) return null;
-  for (const [re, color] of MEDALS) {
-    if (re.test(playoffs)) return color;
-  }
-  return null;
-}
+// Playoff finish -> accent color. Table and matcher live in palette.js.
 
 // "Nth of M" -> humanized division finish + tone (mirror of the layer's).
 function divisionLabel(s) {
@@ -59,7 +47,7 @@ function divisionLabel(s) {
   return { text: s, tone: "neutral" };
 }
 const toneColor = (tone) =>
-  tone === "good" ? "#3f8f2e" : tone === "bad" ? "#c0492b" : "#8a857c";
+  tone === "good" ? TREND.GOOD : tone === "bad" ? TREND.BAD : TREND.NEUTRAL;
 
 // A section heading: hairline + letterspaced label.
 function SectionLabel({ x, right, y, children }) {
@@ -151,7 +139,7 @@ const SeasonPage = memo(function SeasonPage({
   const df = meta ? divisionLabel(meta.divisionFinish) : null;
   const pd = meta?.pointDiff;
   const pdStr = pd == null ? null : pd > 0 ? `(+${pd})` : `(${pd})`;
-  const pdColor = pd > 0 ? "#3f8f2e" : pd < 0 ? "#c0492b" : "#8a857c";
+  const pdColor = pd > 0 ? TREND.GOOD : pd < 0 ? TREND.BAD : TREND.NEUTRAL;
 
   const medal = post ? playoffMedal(post.result) : null;
 

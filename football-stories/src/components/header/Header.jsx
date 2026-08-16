@@ -45,6 +45,7 @@ export default function Header({
   onSearchSelect,
   onOpenAbout,
   onOpenTeams = null,
+  teamsOpen = false,
 }) {
   const controls = useAnimation();
 
@@ -152,6 +153,10 @@ export default function Header({
         <TeamTab
           teamId={selectedTeam}
           onOpen={() => (onOpenTeams ? onOpenTeams() : setTeamSelectOpen(true))}
+          // A shell that owns the picker is the desktop one, and that's the
+          // header where the tab needs to look like a control.
+          prominent={!!onOpenTeams}
+          open={teamsOpen}
         />
 
         {/* right: search */}

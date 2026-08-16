@@ -17,12 +17,18 @@
 // content. Modules stack below the reserved area.
 //
 // eras: the curated Named Era rows for this franchise (or null). At the two
-// coarsest bands (ERA_BANDS) each era's FIRST year buys an ERA_HEADER_H plaque
-// row at the top of its offseason block, so a chapter's title has real layout
-// space and can never land on a season, a card or a ribbon. The row belongs to
-// that block rather than sitting BETWEEN two blocks — that keeps the stack
-// contiguous, which is what tToY/yToYear (and the zoom anchor that calls them)
-// rely on. See eraModel.js.
+// coarsest bands (ERA_BANDS) a chapter buys its own breathing room out of the
+// blocks at its ends: its FIRST year takes an ERA_HEADER_H plaque row off the
+// top of its offseason block, and its LAST year takes an ERA_FOOT_H clear-space
+// row off the bottom of its season block. So a title has real space and can
+// never land on a season, a card or a ribbon, and the closing border never sits
+// flush against the last season.
+//
+// Both rows belong to a BLOCK rather than sitting BETWEEN two blocks — that
+// keeps the stack contiguous, which is what tToY/yToYear (and the zoom anchor
+// that calls them) rely on. The cost is that a season block's `height` is no
+// longer purely its content, so it also reports `contentHeight`/`contentY1` for
+// renderers that lay out inside it. See eraModel.js.
 //
 // A nominal time coordinate (year units) is attached to every block purely for
 // axis labels and zoom anchoring; it stays monotonic and contiguous even though
@@ -40,7 +46,13 @@
 //   }
 
 import { geometryFor, bandAtLeast, DEFAULT_BAND } from "./detail.js";
-import { ERA_BANDS, ERA_HEADER_H, eraSpans } from "./eraModel.js";
+import {
+  ERA_BANDS,
+  ERA_FRAMED_BANDS,
+  ERA_HEADER_H,
+  ERA_FOOT_H,
+  eraSpans,
+} from "./eraModel.js";
 
 const OFF_FRAC = 0.4; // nominal time share of an offseason (axis/anchor only)
 const SEA_FRAC = 0.6; // nominal time share of a season   (OFF_FRAC + SEA_FRAC = 1)
@@ -70,6 +82,14 @@ const REC_LINE_H = 20; // record line under REGULAR SEASON
 const CHIPS_H = 26; // W/L chip row
 const SEC_PAD = 10;
 const POST_LINE_H = 22; // playoff result line ("Missed Playoffs" / finish)
+
+// Clear space above a year's arriving-personnel bands at the "Eras" zoom.
+// Every other band puts a year banner or a card header between the previous
+// season and this year's arrivals; that band has neither (offseasons are
+// hidden), so an entry band landed flush on the season line above it. Only
+// bought when the year actually has arrivals — otherwise it would pad all ~60
+// years of a franchise for the sake of the handful that need it.
+const ERA_ZOOM_RIBBON_HEADROOM = 10;
 
 // A season header strip sits at the TOP of each season block — under the
 // offseason paper, directly above the games — and lays out that year's record.
@@ -110,6 +130,11 @@ export function buildTimelineLayout({
     ? eraSpans({ eras, years: sorted.map((s) => s.year) })
     : [];
   const eraOpensAt = new Map(spans.map((e, i) => [e.firstYear, i]));
+  // Only a FRAMED band closes a chapter with a foot: the clear space exists to
+  // keep a border off the last season, and Season by season draws no border.
+  const eraClosesAt = ERA_FRAMED_BANDS.has(detailBand)
+    ? new Map(spans.map((e, i) => [e.lastYear, i]))
+    : new Map();
   const eraBoxes = spans.map((e) => ({ ...e, y0: 0, contentY: 0, y1: 0 }));
 
   // Modules visible at this detail band (and only when offseasons aren't hidden).
@@ -158,7 +183,14 @@ export function buildTimelineLayout({
     // instead (see resolveRibbonStrips), which is the only thing that works
     // mid-year as well as at year boundaries. `reserve` covers this year's
     // arrivals, which anchor at a fixed row until they pin.
-    const ribbonTop = isPage ? blockTop : blockTop + headerH;
+    //
+    // `ribbonLead` is the Eras-zoom headroom described at the constant: with no
+    // header of any kind between the previous season and this year's arrivals,
+    // the entry bands need their own clear space or they sit flush on the line
+    // above.
+    const ribbonLead =
+      geom.offseason === "hidden" && reserve > 0 ? ERA_ZOOM_RIBBON_HEADROOM : 0;
+    const ribbonTop = isPage ? blockTop : blockTop + headerH + ribbonLead;
     const headerY = isPage ? blockTop + reserve : blockTop;
     const bodyTop = isPage ? headerY + headerH : ribbonTop + reserve;
     const moduleBoxes = [];
@@ -175,7 +207,8 @@ export function buildTimelineLayout({
       }
     }
     // A banner year with no modules is still a real block: just its header.
-    const minOff = eraLead + reserve + headerH + (headerH ? 0 : minOffseasonHeight);
+    const minOff =
+      eraLead + ribbonLead + reserve + headerH + (headerH ? 0 : minOffseasonHeight);
     const offHeight = moduleBoxes.length
       ? Math.max(minOff, cursor - offY0)
       : minOff;
@@ -301,14 +334,25 @@ export function buildTimelineLayout({
       const lineY = seaY0 + seaHeaderH + (seaHeight - seaHeaderH) / 2;
       gamePositions = games.map((g, i) => ({ g, i, y: lineY }));
     }
-    const seaY1 = seaY0 + seaHeight;
+    // A Named Era closing on this year buys its clear space off the BOTTOM of
+    // this block, after every section above has been positioned — so the foot
+    // pads the frame without moving a single mark inside the season.
+    const eraFoot = eraClosesAt.has(year) ? ERA_FOOT_H : 0;
+    const seaY1 = seaY0 + seaHeight + eraFoot;
 
     const seaBlock = {
       type: "season",
       year,
       y0: seaY0,
       y1: seaY1,
-      height: seaHeight,
+      // `height` spans the block INCLUDING the era foot, because the block
+      // stack and the t<->y mappings are defined over y0..y1. Anything laying
+      // out season content wants `contentHeight`/`contentY1` instead — the
+      // zoom-2 card and the line-mode centring both do.
+      height: seaHeight + eraFoot,
+      contentHeight: seaHeight,
+      contentY1: seaY0 + seaHeight,
+      eraFootHeight: eraFoot,
       seasonHeaderHeight: seaHeaderH,
       postseason,
       tStart: year,

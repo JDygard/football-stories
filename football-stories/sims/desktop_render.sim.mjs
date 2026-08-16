@@ -25,7 +25,10 @@ import {
 import DesktopDraftModule from "../src/desktop/DesktopDraftModule.jsx";
 import {
   ERA_HEADER_H, ERA_TEXT_INSET, ERA_BORDER_W, ERA_RAIL_GAP,
+  ERA_RECORD_FS,
 } from "../src/desktop/desktopEraModel.js";
+import { CROWN_H } from "../src/desktop/desktopCrownModel.js";
+import { MEDAL_SB } from "../src/palette.js";
 
 let failures = 0;
 const ok = (cond, msg) => { if (!cond) { failures++; console.log("FAIL:", msg); } };
@@ -97,10 +100,14 @@ const reserveByYear = stripReserveByYear(staff);
 // the story is contiguous, with a GAP (1971-1979) because not every year has
 // to belong to one, and an ongoing era at the end.
 const eras = [
-  { id: "founding", label: "The Founding Years", short: "Founding", start: 1967, end: 1970 },
-  { id: "middle", label: "The Middle Distance", short: "Middle", start: 1980, end: 1999 },
-  { id: "one-off", label: "A Single Forgettable Season", start: 2000, end: 2000 },
-  { id: "modern", label: "The Modern Era", short: "Modern", start: 2001, end: null, ongoing: true },
+  { id: "founding", label: "The Founding Years", short: "Founding", start: 1967, end: 1970,
+    record: { wins: 30, losses: 34, ties: 2 } },
+  { id: "middle", label: "The Middle Distance", short: "Middle", start: 1980, end: 1999,
+    record: { wins: 160, losses: 160, ties: 0 } },
+  { id: "one-off", label: "A Single Forgettable Season", start: 2000, end: 2000,
+    record: { wins: 4, losses: 12, ties: 0 } },
+  { id: "modern", label: "The Modern Era", short: "Modern", start: 2001, end: null, ongoing: true,
+    record: { wins: 120, losses: 100, ties: 0 } },
 ];
 
 const NUMERIC_ATTR = /\b(?:x|y|x1|x2|y1|y2|cx|cy|width|height|rx)="([^"]*)"/g;
@@ -135,6 +142,55 @@ for (const band of DESKTOP_BANDS) {
   // a lane/zone extent that must resolve positive.
   const negSize = [...markup.matchAll(/\b(?:width|height)="(-[\d.]+)"/g)];
   ok(negSize.length === 0, `${band}: no negative rect sizes (${negSize.slice(0, 3).map((m) => m[0]).join(" ")})`);
+
+  // ---- SUPER BOWL CROWNS -------------------------------------------------
+  // The synthetic franchise wins a title every even year, so every line-mode
+  // band renders a whole run of them and the alternating (non-merging) case is
+  // exercised by construction.
+  const geomForCrown = desktopGeometryFor(band);
+  // Built from the constants, not hardcoded, so retuning the plaque can't
+  // silently turn these assertions into no-ops.
+  const PLAQUE_RE = `<rect x="([\\d.]+)" y="([\\d.]+)" width="([\\d.]+)" height="${CROWN_H}" rx="4" fill="${MEDAL_SB}"`;
+  const plaques = [...markup.matchAll(new RegExp(PLAQUE_RE, "g"))];
+  if (geomForCrown.season.mode === "line") {
+    ok(plaques.length > 0, `${band}: Super Bowl crowns render`);
+    ok(markup.includes(">SB<") || /SB ×\d/.test(markup),
+      `${band}: a crown plaque carries its "SB" label`);
+
+    // PAINT ORDER, same rule as the year axis: the crown's outline and plaque
+    // go over the ribbons, which drop through this exact band on their way to
+    // the rail. A crown painted under an opaque connector gets struck through.
+    const lastRibbonPath = markup.lastIndexOf("<path");
+    const firstPlaque = markup.search(new RegExp(PLAQUE_RE));
+    ok(lastRibbonPath === -1 || firstPlaque > lastRibbonPath,
+      `${band}: crown plaques must paint AFTER the ribbon layer`
+      + ` (plaque @${firstPlaque}, last ribbon @${lastRibbonPath})`);
+
+    // A crowned season must not ALSO draw the ordinary medal frame — that
+    // would double-stroke the column.
+    const goldFrames = [...markup.matchAll(
+      new RegExp(`stroke="${MEDAL_SB}" stroke-width="2.5"`, "g"),
+    )];
+    ok(goldFrames.length === plaques.length,
+      `${band}: expected one gold frame per crown, got ${goldFrames.length}`
+      + ` frames for ${plaques.length} plaques — a crowned season is drawing`
+      + ` its own medal frame as well as the crown's`);
+
+    // The crown must clear the era header's record line. This is the whole
+    // premise of borrowing the header's air rather than buying a new row.
+    const recordText = /<text x="[\d.]+" y="([\d.]+)"[^>]*font-size="12.5"/.exec(markup);
+    if (recordText) {
+      const recordBottom = +recordText[1] + ERA_RECORD_FS * 0.25;
+      const topPlaque = Math.min(...plaques.map((m) => +m[2]));
+      ok(topPlaque >= recordBottom,
+        `${band}: a crown plaque at y=${topPlaque.toFixed(1)} strikes through the`
+        + ` era record line at y=${recordBottom.toFixed(1)}`);
+    }
+  } else {
+    // Row-mode bands spell the finish out in the game log, so no crown.
+    ok(plaques.length === 0,
+      `${band}: crowns belong to the line-mode zooms only, found ${plaques.length}`);
+  }
 
   const geom = desktopGeometryFor(band);
   if (geom.offseason === "hidden") {
@@ -300,6 +356,41 @@ for (const band of DESKTOP_BANDS) {
     }
     const eyebrows = [...markup.matchAll(/<text x="([\d.]+)" y="[\d.]+" data-era-years="/g)]
       .map((m) => +m[1]);
+    // The record line: same gutter, under the title, and only where a title is.
+    const records = [...markup.matchAll(/<text x="([\d.]+)" y="([\d.]+)" data-era-record="/g)]
+      .map((m) => ({ x: +m[1], y: +m[2] }));
+    const titleYs = [...markup.matchAll(/<text x="[\d.]+" y="([\d.]+)" data-era-title="/g)]
+      .map((m) => +m[2 - 1]);
+    ok(records.length > 0, `${band}: era records rendered`);
+    // Plaque text is black ink — the era's tone lives in the border and wash,
+    // not in the words.
+    ok(!/data-era-(?:title|years|record)="[^"]+"[^>]*fill="hsl\(/.test(markup),
+      `${band}: no plaque text is tinted`);
+    ok(/data-era-title="[^"]+"[^>]*fill="#111111"/.test(markup),
+      `${band}: era titles are black`);
+    ok(records.length <= titles.length,
+      `${band}: no record without a title (${records.length} records, ${titles.length} titles)`);
+    ok(markup.includes(">160-160<"), `${band}: a tieless record reads W-L`);
+    ok(markup.includes(">30-34-2<"), `${band}: a record with ties reads W-L-T`);
+    // A record is EITHER inline with the title (right of it, same baseline) or
+    // stacked on the standard gutter a line below. Never anywhere else.
+    for (const r of records) {
+      const inline = titleYs.includes(r.y);
+      if (inline) {
+        ok(gutterOf(r.x) > ERA_TEXT_INSET,
+          `${band}: inline record at x=${r.x} sits right of the gutter`);
+      } else {
+        ok(gutterOf(r.x) === ERA_TEXT_INSET,
+          `${band}: stacked record at x=${r.x} shares the gutter (${gutterOf(r.x)})`);
+      }
+    }
+    ok(records.some((r) => titleYs.includes(r.y)),
+      `${band}: at least one record rides the title's line`);
+    // Every mark still lands inside its own frame.
+    for (const r of records) ok(gutterOf(r.x) !== null, `${band}: record inside a frame`);
+    // Painted with the rest of the label — after the ribbons, haloed.
+    ok(markup.indexOf('data-era-record=') > markup.lastIndexOf('<path'),
+      `${band}: the record paints after the ribbons`);
     for (const ex of eyebrows) {
       ok(gutterOf(ex) === ERA_TEXT_INSET,
         `${band}: years eyebrow at x=${ex} shares the gutter (${gutterOf(ex)})`);

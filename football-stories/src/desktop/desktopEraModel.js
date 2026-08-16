@@ -35,6 +35,16 @@ export const ERA_YEARS_BASELINE = 30;
 export const ERA_RULE_Y = 44; // short accent rule between the two lines
 export const ERA_RULE_W = 34;
 export const ERA_LABEL_BASELINE = 68;
+// The chapter's aggregate record, on its own line under the title — the wall
+// label's "medium and dimensions" line. It's the one number that makes a
+// chapter's name mean something at a glance ("The Aints, 43-113-4"), and the
+// pipeline has computed it since day one; it just wasn't being drawn. The band
+// is 132 tall with the title baseline at 68, so this sits in air that already
+// existed.
+export const ERA_RECORD_BASELINE = 92;
+export const ERA_RECORD_FS = 12.5;
+// Gap between the title and the record when the two share a line.
+const RECORD_INLINE_GAP = 12;
 
 export const ERA_LABEL_FS = 21;
 export const ERA_YEARS_FS = 11;
@@ -75,7 +85,16 @@ export const ERA_TONE_COUNT = 8;
 // size — Palatino/Iowan lowercase sits near 0.5em. Estimating the serif at the
 // bold-sans rate is what made short chapter names like "Unitas" get dropped
 // from frames they comfortably fit in.
-const CHAR_W = { serif: 0.5, sans: 0.55, bold: 0.58 };
+// Two serif numbers on purpose, because the estimate is asked two different
+// questions and the safe answer differs:
+//   "serif"     — DOES IT FIT? Under-measure. A title dropped for being 2px too
+//                 wide costs a chapter its name; one that overhangs a couple of
+//                 px into the right pad costs nothing.
+//   "serifWide" — WHERE DOES IT END? Over-measure. Anything positioned AFTER
+//                 the title has to clear the real glyphs, and under-measuring
+//                 here printed the record straight through the tail of
+//                 "Grant's Twilight".
+const CHAR_W = { serif: 0.5, serifWide: 0.62, sans: 0.55, bold: 0.58 };
 
 // …and per CHARACTER, relative to that base. Counting every glyph the same
 // made "Unitas" (four narrow letters) measure wider than a frame it fits in
@@ -97,6 +116,18 @@ export function estimateTextWidth(text, fontSize, face = "sans", tracking = 0) {
   let units = 0;
   for (const ch of str) units += charUnits(ch);
   return units * fontSize * (CHAR_W[face] ?? CHAR_W.sans) + str.length * tracking;
+}
+
+// "141-67", or "43-113-4" when the era has ties. Ties are dropped when zero —
+// every modern chapter would otherwise carry a meaningless "-0". Matches
+// recordStr() in DesktopTimelineLayer so a chapter's record and a season's
+// record are punctuated the same way.
+export function eraRecordLabel(era) {
+  const r = era?.record;
+  if (!r) return "";
+  const { wins, losses, ties } = r;
+  if (wins == null || losses == null) return "";
+  return ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`;
 }
 
 // "1998–2010", "2011" for a single season, "2019–now" for an ongoing era.
@@ -153,6 +184,28 @@ export function buildEraBoxes({ eras, layout }) {
       estimateTextWidth(yearsText, ERA_YEARS_FS, "sans", ERA_YEARS_TRACKING) <=
       width - ERA_TEXT_INSET - YEARS_PAD_R;
 
+    // The record only appears where the TITLE is, to caption it. On a frame too
+    // narrow for a name, a bare "43-113-4" under a date range reads as a stray
+    // number rather than as a chapter's record.
+    //
+    // It sits IN LINE with the title when both fit on one line — a wall label
+    // reads "The Dome Patrol   69-42" as one statement, and the stacked version
+    // spends a whole line on five characters. It drops to its own line only
+    // when the pair won't fit.
+    const recordText = eraRecordLabel(era);
+    const recordW = estimateTextWidth(recordText, ERA_RECORD_FS, "sans");
+    // The PESSIMISTIC title width — this one decides both whether the record
+    // fits beside the title and where it starts, so the two can never disagree.
+    const labelEndW = labelText
+      ? estimateTextWidth(labelText, ERA_LABEL_FS, "serifWide")
+      : 0;
+    const recordInline =
+      !!labelText && !!recordText &&
+      labelEndW + RECORD_INLINE_GAP + recordW <= inner;
+    const showRecord =
+      !!labelText && !!recordText &&
+      (recordInline || recordW <= width - ERA_TEXT_INSET - YEARS_PAD_R);
+
     boxes.push({
       id: era.id || `${era.start}-${end}`,
       label: era.label,
@@ -172,6 +225,17 @@ export function buildEraBoxes({ eras, layout }) {
       textX: x0 + ERA_TEXT_INSET,
       labelX: labelText ? x0 + ERA_TEXT_INSET : null,
       yearsX: showYears ? x0 + ERA_TEXT_INSET : null,
+      recordText,
+      showRecord,
+      recordInline: showRecord && recordInline,
+      // Inline: to the right of the title, on its baseline. Stacked: back on
+      // the standard gutter, a line below.
+      recordX: !showRecord
+        ? null
+        : recordInline
+          ? x0 + ERA_TEXT_INSET + labelEndW + RECORD_INLINE_GAP
+          : x0 + ERA_TEXT_INSET,
+      recordBaseline: recordInline ? ERA_LABEL_BASELINE : ERA_RECORD_BASELINE,
       // Palette slot. Assigned by POSITION, not by id, so neighbouring eras are
       // always different tones no matter what the curated file happens to be
       // called.

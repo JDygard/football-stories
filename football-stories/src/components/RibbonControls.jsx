@@ -1,14 +1,22 @@
-// Inline ribbon controls — lives inside the footer drawer.
+// Inline ribbon controls — lives inside the footer drawer (mobile) and the
+// right sidebar (desktop).
 //   - Staff role toggles: coaches / GMs / owners independently.
-//   - Individual players: click any row to add/remove its ribbon.
+//   - Individual players: click any row to add/remove its ribbon. Adding one
+//     also scrolls the timeline to that stint (onFocusYear) so you land on
+//     the track you just switched on instead of hunting for it.
 //   - Bulk: pick a position chip, then "+ add all who played" — adds every
 //     player in that group WHO TOOK THE FIELD (games > 0); never-played
 //     picks are skipped by bulk (you can still add them individually).
-//   - The list is the franchise's full tenure set, paged with "show more".
-//     Approximate tenures (no roster data yet) are marked ~.
+//   - The list is the franchise's full tenure set, ordered LONGEST STINT
+//     FIRST, paged with "show more". Approximate tenures (no roster data yet)
+//     are marked ~.
+//
+// A row is a STINT, not a player: someone with two spells at the franchise
+// gets two rows, each selected independently. Everything here keys on
+// `tenureKey(row)`, never on player_id — see useTeamTenures.js.
 
 import { useEffect, useMemo, useState } from "react";
-import useTeamTenures from "../hooks/useTeamTenures.js";
+import useTeamTenures, { tenureKey } from "../hooks/useTeamTenures.js";
 import { roleColor, positionGroup } from "./visualization/staffRibbonModel.js";
 
 // Selection guard. Concurrency is what actually matters visually (tail
@@ -34,7 +42,17 @@ const ROLES = [
 // games); pipeline roster rows count as played (you were on a roster).
 const played = (t) => (t.games == null ? true : t.games > 0);
 
-export default function RibbonControls({ teamId, draftSegment, config, onChange }) {
+export default function RibbonControls({
+  teamId,
+  draftSegment,
+  config,
+  onChange,
+  // Optional: called with the stint's first year when a track is switched ON,
+  // so the host can scroll the timeline to it. App.jsx / DesktopApp.jsx wire
+  // this to their focusYear state (the same deep-link path the league view
+  // and career-follow use).
+  onFocusYear = null,
+}) {
   const { tenures, source } = useTeamTenures(teamId, draftSegment);
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("all");
@@ -45,8 +63,8 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
     setVisibleCount(PAGE);
   }, [query, group, teamId]);
 
-  const selectedIds = useMemo(
-    () => new Set((config.players || []).map((p) => p.player_id)),
+  const selectedKeys = useMemo(
+    () => new Set((config.players || []).map(tenureKey)),
     [config.players],
   );
 
@@ -56,7 +74,19 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
       .filter((t) => t.name)
       .filter((t) => group === "all" || positionGroup(t.position) === group)
       .filter((t) => !q || t.name.toLowerCase().includes(q))
-      .sort((a, b) => (b.to || 0) - (a.to || 0) || String(a.name).localeCompare(b.name));
+      // Longest stint with THIS franchise first. Playing time is what you
+      // actually want at the top of a 700-row list, and seasons-here is the
+      // best proxy the data carries: the roster segments have no snap or game
+      // counts, and career games (when the approx/draft path supplies them)
+      // are league-wide, so they only break ties. Recency, then name, settle
+      // the rest so the order is stable.
+      .sort(
+        (a, b) =>
+          (b.seasons || 0) - (a.seasons || 0) ||
+          (b.games ?? -1) - (a.games ?? -1) ||
+          (b.to || 0) - (a.to || 0) ||
+          String(a.name).localeCompare(String(b.name)),
+      );
   }, [tenures, query, group]);
 
   const shown = matches.slice(0, visibleCount);
@@ -68,23 +98,28 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
     });
   };
 
+  // Toggling is per STINT: removing Cam Newton's 2021 cameo must leave his
+  // 2011-2019 run on the timeline, so this filters by key, not player_id.
   const togglePlayer = (t) => {
-    if (selectedIds.has(t.player_id)) {
+    const k = tenureKey(t);
+    if (selectedKeys.has(k)) {
       onChange({
         ...config,
-        players: config.players.filter((p) => p.player_id !== t.player_id),
+        players: config.players.filter((p) => tenureKey(p) !== k),
       });
       return;
     }
     if ((config.players || []).length >= MAX_PLAYERS) return;
     onChange({ ...config, players: [...(config.players || []), t] });
+    // Land on what you just switched on.
+    if (onFocusYear && t.from != null) onFocusYear(t.from);
   };
 
   // Bulk: everyone in the current filter who actually played and isn't
   // already selected, up to the cap.
   const bulkCandidates = useMemo(
-    () => matches.filter((t) => played(t) && !selectedIds.has(t.player_id)),
-    [matches, selectedIds],
+    () => matches.filter((t) => played(t) && !selectedKeys.has(tenureKey(t))),
+    [matches, selectedKeys],
   );
   const room = MAX_PLAYERS - (config.players || []).length;
   const addAll = () => {
@@ -226,7 +261,7 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
               const g = positionGroup(p.position);
               return (
                 <button
-                  key={p.player_id}
+                  key={tenureKey(p)}
                   onClick={() => togglePlayer(p)}
                   title="Remove from tracks"
                   style={{
@@ -246,8 +281,11 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
                     background: roleColor(g), display: "inline-block",
                   }} />
                   <span style={{ fontWeight: 600, color: "#222" }}>{p.name}</span>
+                  {/* Years, because a player can be here twice — two "Cam
+                      Newton" chips are otherwise indistinguishable. */}
                   <span style={{ color: "#999" }}>
-                    {p.position || ""}{p.source === "approx" ? " ~" : ""}
+                    {p.position || ""} {p.from}–{p.to}
+                    {p.source === "approx" ? " ~" : ""}
                   </span>
                   <span style={{ color: "#aab", fontWeight: 700, fontSize: 14, lineHeight: 1 }}>×</span>
                 </button>
@@ -260,17 +298,18 @@ export default function RibbonControls({ teamId, draftSegment, config, onChange 
       {/* tenure list */}
       <div style={{ overflowY: "auto", flex: 1, padding: "4px 6px 8px" }}>
         <div style={{ padding: "2px 8px 4px", color: "#999", fontSize: 11 }}>
-          {matches.length} player{matches.length === 1 ? "" : "s"} match
+          {/* stints, not players — a player with two spells here has two rows */}
+          {matches.length} stint{matches.length === 1 ? "" : "s"} match
           {source !== "pipeline" &&
             " · drafted players only, tenures approximated (~) until the roster pipeline runs"}
         </div>
         {shown.map((t) => {
-          const on = selectedIds.has(t.player_id);
+          const on = selectedKeys.has(tenureKey(t));
           const g = positionGroup(t.position);
           const sat = played(t);
           return (
             <div
-              key={t.player_id}
+              key={tenureKey(t)}
               onClick={() => togglePlayer(t)}
               style={{
                 display: "flex", alignItems: "center", gap: 8,

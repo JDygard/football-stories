@@ -26,22 +26,12 @@
 
 import { allocateTailSlots } from "./allocateTailSlots.js";
 
-export const ROLE_COLORS = {
-  owner: "#b03a3c", // deep red (mockup palette; was blue)
-  gm: "#e0862e", // warm orange
-  coach: "#2e8b45", // green
-  // player ribbons color by position group
-  qb: "#8e44ad",
-  rb: "#0e8f76",
-  wr: "#2d6cdf",
-  te: "#6c8fd6",
-  ol: "#8a6d3b",
-  dl: "#b03a3a",
-  lb: "#5e7c1e",
-  db: "#17a2b8",
-  st: "#777777",
-  unknown: "#999",
-};
+// Personnel colors live in ../../palette.js — one table shared with the desktop
+// tree, and the place the "no red, no green outside results" rule is enforced.
+// Re-exported here so the many existing `from "./staffRibbonModel.js"` imports
+// keep working.
+import { roleColor } from "../../palette.js";
+export { ROLE_COLORS, roleColor } from "../../palette.js";
 
 // Position string -> ribbon role/color group for player spans.
 const POSITION_GROUPS = {
@@ -76,10 +66,6 @@ const MAX_TAIL_SLOTS = Math.floor(SQUISH_BUDGET / MIN_TAIL_W); // 16
 // that exposes the "leaving" stub of exit bands (they still run to the true
 // edge) and seeds the drag-to-follow-a-career affordance.
 export const PEEK = 3;
-
-export function roleColor(role) {
-  return ROLE_COLORS[role] || ROLE_COLORS.unknown;
-}
 
 const entryOrder = (a, b) =>
   String(a.name).localeCompare(String(b.name)) ||

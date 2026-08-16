@@ -33,6 +33,7 @@ import { memo } from "react";
 import {
   ERA_HEADER_H,
   ERA_LABEL_BASELINE,
+  ERA_RECORD_FS,
   ERA_YEARS_BASELINE,
   ERA_RULE_Y,
   ERA_RULE_W,
@@ -54,19 +55,25 @@ const LABEL_FAMILY = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
 // must match ERA_TONE_COUNT.
 const ERA_HUES = [212, 168, 96, 32, 284, 246, 138, 8];
 
-// One tone = four values off the same hue. The wash and the header are almost
-// white (a franchise with nine eras should not look like a paint chart); the
-// border and the title carry the identity.
+// One tone = three values off the same hue. The wash and the header band are
+// almost white (a franchise with twelve eras should not look like a paint
+// chart); the border carries the identity.
+//
+// The TEXT is deliberately not in the tone. A wall label is black ink on a
+// mount, and tinting the words made each chapter's title read as a different
+// kind of thing rather than the same kind of thing about a different era.
+// Hierarchy inside the label comes from size and weight, not hue — which is
+// also what keeps the small type legible over a ribbon passing behind it.
 const tone = (i) => {
   const h = ERA_HUES[i % ERA_HUES.length];
   return {
     wash: `hsl(${h} 44% 98.4%)`,
     header: `hsl(${h} 38% 96.4%)`,
     border: `hsl(${h} 30% 58%)`,
-    label: `hsl(${h} 32% 26%)`,
-    years: `hsl(${h} 20% 45%)`,
   };
 };
+
+const ERA_INK = "#111111";
 
 // Thicker than a hairline and drawn in the era's own color: at 1.5px neutral
 // grey the frames read as gridlines rather than as the boundaries of a chapter.
@@ -161,7 +168,7 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   fontSize={ERA_YEARS_FS}
                   fontWeight={600}
                   textAnchor="start"
-                  fill={t.years}
+                  fill={ERA_INK}
                   stroke="#ffffff"
                   strokeWidth={3}
                   strokeLinejoin="round"
@@ -196,6 +203,24 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   />
                 </g>
               )}
+              {b.showRecord && (
+                <text
+                  x={b.recordX}
+                  y={top + b.recordBaseline}
+                  data-era-record={b.id}
+                  fontSize={ERA_RECORD_FS}
+                  fontWeight={600}
+                  textAnchor="start"
+                  fill={ERA_INK}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  style={{ letterSpacing: 0.6 }}
+                >
+                  {b.recordText}
+                </text>
+              )}
               {b.labelText && (
                 <text
                   x={b.labelX}
@@ -204,7 +229,7 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   fontSize={ERA_LABEL_FS}
                   fontWeight={600}
                   textAnchor="start"
-                  fill={t.label}
+                  fill={ERA_INK}
                   stroke="#ffffff"
                   strokeWidth={4.5}
                   strokeLinejoin="round"

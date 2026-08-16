@@ -14,22 +14,39 @@
 // Kept JSX-free so sims/mobile_layout.sim.mjs can assert it in node (vite build
 // can't run in the sandbox — see the build-constraint note in the repo docs).
 
-// Bands that draw era frames: the two most zoomed-out rungs, where a
-// multi-decade chapter is compressed enough to read as one shape. Below these
-// a single era is taller than the screen, so the frame stops being a frame and
-// starts being a pair of unrelated horizontal rules.
-export const ERA_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
+// Bands that show Named Eras at all — i.e. the bands whose layout reserves a
+// plaque row.
+export const ERA_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES", "GAME_BANDS"]);
+
+// …and the subset that draws the FRAME around them: the two most zoomed-out
+// rungs, where a multi-decade chapter is compressed enough to read as one
+// shape. At Season by season a single era runs many screens tall, so a box
+// around it stops being a box and becomes a pair of unrelated horizontal rules
+// you meet minutes apart. There the plaque appears alone — the title still
+// tells you which chapter you are in, with no chrome pretending to contain it —
+// and it needs no closing foot either, since there is no border to clear.
+export const ERA_FRAMED_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
 
 // The plaque row: a museum wall label introducing the chapter beneath it. This
 // is a REAL ROW in the layout, not an overlay — buildTimelineLayout adds it to
 // the top of the era's first offseason block, so the title can never land on
 // top of a season, a card, or a ribbon.
 //
-// Shorter than the desktop's 132: a phone's vertical budget is its scarcest
-// one, and where desktop spends the extra air separating the label from a
-// timeline that runs away horizontally, here the content the label introduces
-// begins immediately below it.
-export const ERA_HEADER_H = 84;
+// Most of this is the AIR under the title (the baselines below run out at 64),
+// and that air is the whole point: a wall label earns its authority from the
+// empty space around the words, not from the size of the type. An early 84 put
+// the first season almost directly under the title and the two read as one
+// stacked block instead of a caption and the thing it captions; 120 overshot
+// and left the chapters looking sparse. 100 is the settled value — ~36px of
+// air, a little over half the title's own height.
+export const ERA_HEADER_H = 100;
+
+// …and the matching air at the other end: clear space between the last season
+// of a chapter and the frame's bottom border, bought the same way (added to
+// that season's block, see buildTimelineLayout). Without it the border sits
+// flush against the final season and reads as a clipping edge rather than as
+// the close of a chapter.
+export const ERA_FOOT_H = 16;
 
 // THE standardized left gutter, measured from the frame's own left border.
 // Every line of era text starts here — the dates eyebrow, the accent rule, the
@@ -60,7 +77,9 @@ export const ERA_BORDER_W = 2;
 
 // How far the frame insets from the screen edges. The left edge sits outside
 // the zoom-2 timeline stripe so the whole apparatus — stripe, dots, cards — is
-// enclosed by the chapter that contains it.
+// enclosed by the chapter that contains it. ERA_EDGE_R only applies when there
+// is no personnel rail; when there is, the frame runs out to the rail's far
+// edge instead (see buildEraBoxes).
 export const ERA_EDGE_L = 4;
 export const ERA_EDGE_R = 6;
 
@@ -198,12 +217,28 @@ export function eraSpans({ eras, years }) {
 // seasons it covers. A one-season era on a phone gets the same wall label as a
 // twenty-season one, which is the one place this orientation is strictly better
 // than the desktop's (where a narrow chapter goes wordless).
-export function buildEraBoxes({ eras, width, railLeft = null }) {
+// `railRight` is the FAR edge of the personnel tail gutter (not its near edge).
+// The frame runs all the way out to it, so the vertical tails are INSIDE the
+// chapter: a tail is a person who is with the team through those years, which
+// makes them part of the era, exactly as the desktop frame runs down through
+// its rail to enclose the tenure bands.
+//
+// What stays outside is arrival and departure, at both ends and for the same
+// reason. Entry bands come in from off-screen left, crossing the frame's left
+// edge — a person arrives INTO a chapter from outside it. Exit bands run out
+// past the gutter to the true screen edge, crossing the right edge on the way;
+// the leaving belongs to the person, not to the chapter they are walking out of.
+// `textLeft` overrides the gutter for UNFRAMED bands. ERA_TEXT_INSET is measured
+// from a frame's own left border, which is the right anchor only when there is
+// a border to measure from; with the frame gone the plaque has to line up with
+// whatever the band's content already lines up with (the season page's own left
+// margin), or it reads as an arbitrary indent.
+export function buildEraBoxes({ eras, width, railRight = null, textLeft = null }) {
   if (!eras?.length || !width) return [];
 
   const x0 = ERA_EDGE_L;
-  const x1 = Math.max(x0 + 1, (railLeft ?? width) - ERA_EDGE_R);
-  const textX = x0 + ERA_TEXT_INSET;
+  const x1 = Math.max(x0 + 1, railRight ?? width - ERA_EDGE_R);
+  const textX = textLeft ?? x0 + ERA_TEXT_INSET;
   const inner = x1 - textX - LABEL_PAD_R;
 
   return eras.map((e) => {

@@ -17,6 +17,7 @@
 
 import { STRIP_H, PEEK } from "./staffRibbonModel.js";
 import { teamName } from "./teamMeta.js";
+import { onColor } from "../../palette.js";
 
 const PX_PER_CHAR = 5.8; // rough advance for fontSize 10
 // How far the gutter must be dragged open before compressed tails have grown
@@ -257,7 +258,11 @@ export default function StaffRibbonLayer({
               fontSize={10.5}
               fontWeight={700}
               dominantBaseline="middle"
-              fill="#fff"
+              // Label color follows the ribbon, rather than being hardcoded
+              // white. White-on-everything is what used to force every
+              // personnel color to be dark; onColor is what lets the palette
+              // spend a light step (db, unknown) at all. See palette.js.
+              fill={onColor(r.color)}
               style={{ pointerEvents: "none", userSelect: "none" }}
             >
               {stripLabel(r, title, maxChars)}

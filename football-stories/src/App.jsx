@@ -98,6 +98,9 @@ function App() {
             ...c,
             players: [
               {
+                // Same stint key the panel builds, so the row/chip reads as
+                // selected when we land (see useTeamTenures.tenureKey).
+                key: `${id}:${row.from}:${row.to}`,
                 player_id: id,
                 name: row.name ?? pendingFollow.name,
                 position: row.position ?? pendingFollow.position,
@@ -185,6 +188,9 @@ function App() {
           draftSegment={draftSegment}
           ribbonConfig={ribbonConfig}
           onRibbonConfigChange={setRibbonConfig}
+          // Switching a personnel track on scrolls the timeline to that
+          // stint's first year — same deep-link path as the league view.
+          onFocusYear={setFocusYear}
           settings={settings}
           onSettingsChange={setSettings}
         />

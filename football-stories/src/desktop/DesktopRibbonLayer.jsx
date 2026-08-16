@@ -24,6 +24,7 @@
 // click that trails a drag is ignored.
 
 import { CONN_W, PEEK, PILL_H } from "./desktopRibbonModel.js";
+import { onColor } from "../palette.js";
 
 const PX_PER_CHAR = 5.8; // rough advance for fontSize 10
 const FADE_LEN = 26; // how far a destination ribbon bleeds past its pill
@@ -236,7 +237,9 @@ export default function DesktopRibbonLayer({
                 fontSize={10}
                 fontWeight={600}
                 dominantBaseline="middle"
-                fill="#fff"
+                // Follows the ribbon color instead of being hardcoded white —
+                // see the same note in the mobile StaffRibbonLayer.
+                fill={onColor(r.color)}
                 style={{ pointerEvents: "none", userSelect: "none" }}
               >
                 {bandLabel(r, title, maxChars)}

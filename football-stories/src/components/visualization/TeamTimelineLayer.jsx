@@ -16,7 +16,7 @@ import { buildStaffRibbons, resolveRibbonStrips, PEEK } from "./staffRibbonModel
 import StaffRibbonLayer from "./StaffRibbonLayer.jsx";
 import SeasonPage from "./SeasonPage.jsx";
 import EraLayer from "./EraLayer.jsx";
-import { buildEraBoxes } from "./eraModel.js";
+import { buildEraBoxes, ERA_FRAMED_BANDS } from "./eraModel.js";
 import {
   classGradeFor,
   classSummary,
@@ -25,10 +25,14 @@ import {
   tierTextColor,
 } from "./offseason/draftModel.js";
 
-const WIN = "#2e9d51"; // victory green — winner
-const LOSS = "#d0423f"; // loss red — loser (vivid but not neon)
-const TIE = "#b9bdc4"; // neutral gray — tie
-const BORDER = "#d9d9d9"; // hairline separator between the win/loss colors
+import { RESULT, TREND, CURVE as CURVE_TOKENS, playoffMedal } from "../../palette.js";
+
+// Red and green are RESERVED for results (see palette.js). Personnel ribbons
+// used to share them and no longer do.
+const WIN = RESULT.WIN;
+const LOSS = RESULT.LOSS;
+const TIE = RESULT.TIE;
+const BORDER = RESULT.BORDER; // hairline separator between the win/loss colors
 const BORDER_W = 2; // px the grey underlay is offset toward the loser
 const TEXTBG = "#d0d0d0"; // silver label backdrop (~11:1 contrast with dark label)
 const LABEL_FILL = "#1a1a1a";
@@ -42,7 +46,7 @@ const OFF_PAPER = "#fbfbfa";        // paper surface — near-white, neutral
 const OFF_HAIR = "#ececec";         // soft divider hairline on paper
 const OFF_YEAR = "#2e3338";         // year — cool near-black, minimalist
 const SEASON_HEADER_BG = "#f4f4f3"; // faint strip behind the record header
-const CURVE = "#3f5d9e";            // win-rate line + pill (navy, mockup palette)
+const CURVE = CURVE_TOKENS.mobile;  // win-rate line + pill (navy, mockup palette)
 
 // Zoom 2 "Seasons" card list: a far-left timeline stripe with per-year
 // indicator dots, and one rounded card per season.
@@ -59,24 +63,9 @@ const CARD_YEAR_Y = 30; // year text BASELINE
 const CARD_DOT_Y = CARD_YEAR_Y - 6; // dot centre, optically level with the digits
 const CARD_PCT_Y = CARD_YEAR_Y + 19; // all-time win% line under the year
 
-// Playoff finish -> outline color at Zoom 1/2 (line modes). Tune freely.
-// NOTE: user spec'd gold/silver(conf)/bronze(div)/black(WC); "Lost SB" was
-// unassigned, so it took silver and Lost Conf shifted to steel.
-const MEDALS = [
-  [/won (sb|super|champ)/i, "#d4af37"], // gold — won it all
-  [/lost (sb|super)/i, "#b9bec7"],      // silver — lost the big one
-  [/lost conf|lost champ/i, "#8d99ae"], // steel — lost conference
-  [/lost div/i, "#cd7f32"],             // bronze — lost divisional
-  [/lost wc/i, "#2b2b2b"],              // black — lost wild card
-];
-
-function playoffMedal(playoffs) {
-  if (!playoffs) return null;
-  for (const [re, color] of MEDALS) {
-    if (re.test(playoffs)) return color;
-  }
-  return null;
-}
+// Playoff finish -> outline color at Zoom 1/2 (line modes): gold / silver /
+// steel / bronze / black. The table and the matcher live in palette.js so the
+// desktop tree and SeasonPage cannot drift from this one.
 
 // The season header: at zoom 4 a faint strip at the top of the season block,
 // under the offseason paper and directly above the games; in the zoom-2
@@ -91,15 +80,15 @@ function SeasonHeader({ block, contentLeft, contentRight, meta, showPlayoffs = t
 
   const pd = meta.pointDiff;
   const pdStr = pd == null ? null : pd > 0 ? `+${pd}` : `${pd}`;
-  const pdColor = pd > 0 ? "#3f8f2e" : pd < 0 ? "#c0492b" : "#8a857c";
+  const pdColor = pd > 0 ? TREND.GOOD : pd < 0 ? TREND.BAD : TREND.NEUTRAL;
 
   const df = divisionLabel(meta.divisionFinish);
   const dfColor = df
     ? df.tone === "good"
-      ? "#3f8f2e"
+      ? TREND.GOOD
       : df.tone === "bad"
-        ? "#c0492b"
-        : "#8a857c"
+        ? TREND.BAD
+        : TREND.NEUTRAL
     : null;
 
   if (card) {
@@ -295,12 +284,16 @@ const SeasonBlock = memo(function SeasonBlock({ block, contentLeft, contentRight
   const diff = wins - losses;
   const unit = cw / 2 / 16; // a 16-game swing fills half the width
   const hh = block.seasonHeaderHeight || 0;
-  const y = block.y0 + hh + (block.height - hh) / 2; // center in the content, below the header
+  // contentHeight, not height: the last season of a Named Era carries that
+  // chapter's closing clear space at the bottom of its block, and centring in
+  // the padded height would drag the season's own bar down into it.
+  const contentH = block.contentHeight ?? block.height;
+  const y = block.y0 + hh + (contentH - hh) / 2; // center in the content, below the header
   const barW = Math.min(cw / 2, Math.abs(diff) * unit);
   const x0 = diff >= 0 ? centerX : centerX - barW;
   const color = diff >= 0 ? WIN : LOSS;
   const medal = showPlayoffs ? playoffMedal(raw.playoffs) : null;
-  const frameH = Math.max(8, Math.min(block.height - 1, 12));
+  const frameH = Math.max(8, Math.min(contentH - 1, 12));
   return (
     <g>
       {header}
@@ -541,7 +534,7 @@ const OffseasonBlock = memo(function OffseasonBlock({
                     {win.dir !== 0 && (
                       <polygon
                         points={win.dir > 0 ? up : down}
-                        fill={win.dir > 0 ? "#4ade80" : "#ff6b6b"}
+                        fill={win.dir > 0 ? TREND.UP : TREND.DOWN}
                         stroke="#ffffff"
                         strokeWidth={0.75}
                         strokeLinejoin="round"
@@ -732,22 +725,31 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
   // two coarsest — buildTimelineLayout doesn't reserve plaque rows elsewhere,
   // so there is nothing here to draw into.
   //
-  // The frame stops short of the tail gutter rather than running under it: a
-  // career leaving the franchise belongs to the person, not to the chapter they
-  // are walking out of.
+  // The frame runs out THROUGH the tail gutter to its far edge: a vertical tail
+  // is a person who is with the team across those years, and so is part of the
+  // era. Only the PEEK sliver past the gutter — the stub of a career on its way
+  // off the screen — stays outside.
+  const eraFramed = ERA_FRAMED_BANDS.has(band);
   const eraBoxes = useMemo(
     () =>
       buildEraBoxes({
         eras: layout?.eras,
         width,
-        railLeft: railWidth ? railLeft : null,
+        railRight: railWidth ? railLeft + railWidth : null,
+        // No frame to hang the gutter off — line the plaque up with the page.
+        textLeft: eraFramed ? null : contentLeft,
       }),
-    [layout, width, railWidth, railLeft],
+    [layout, width, railWidth, railLeft, eraFramed, contentLeft],
   );
   const visibleEras = useMemo(
     () => eraBoxes.filter((b) => b.y1 > scrollY - vPad && b.y0 < vBot),
     [eraBoxes, scrollY, vPad, vBot],
   );
+  // (eraFramed is declared above, with the boxes it feeds.) Season by season
+  // shows the era HEADERS but no frame: one chapter runs many screens there, so
+  // a box around it would only ever be two horizontal rules met minutes apart.
+  // No frame means no wash either — the season pages already paint the surface
+  // the plaque sits on.
 
   // Years with any visible block — the per-year passes (zoom-2 cards, zoom-3
   // pages) render once per year, not once per half-block.
@@ -792,8 +794,8 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
     </defs>
     <g transform={`translate(0, ${stackHeight - scrollY})`}>
       {/* NAMED ERAS, pass 1 — the interior tint and the plaque's band, UNDER
-          the curve, the cards and every block. */}
-      <EraLayer boxes={visibleEras} layer="wash" />
+          the curve, the cards and every block. Framed bands only. */}
+      {eraFramed && <EraLayer boxes={visibleEras} layer="wash" />}
 
       {/* all-time win-rate curve (0..1 across the content width), drawn BEHIND
           the blocks so each opaque offseason banner — and the franchise-record
@@ -852,14 +854,17 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
             // The card starts at the block's CONTENT top, not its y0: when a
             // Named Era opens on this year the block is carrying that era's
             // plaque row above it, and the card must not swallow it.
+            // …and stops at the season's CONTENT bottom, above the closing
+            // clear space when this is the last year of a chapter.
             const cardTop = off.contentY ?? off.y0;
+            const cardBottom = sea.contentY1 ?? sea.y1;
             return (
               <g key={`card-${year}`}>
                 <rect
                   x={CARD_L}
                   y={cardTop + 3}
                   width={Math.max(0, cardRight - CARD_L)}
-                  height={sea.y1 - cardTop - 6}
+                  height={cardBottom - cardTop - 6}
                   rx={10}
                   fill="#fff"
                   stroke={expanded ? CARD_SELECTED : CARD_STROKE}
@@ -1002,9 +1007,9 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         tapGuard={tapGuard}
       />
 
-      {/* NAMED ERAS, pass 2 — the border and the label, over the ribbons and
-          everything else, each mark haloed in white. */}
-      <EraLayer boxes={visibleEras} layer="plaque" />
+      {/* NAMED ERAS, pass 2 — the label (and, on framed bands, the border) over
+          the ribbons and everything else, each mark haloed in white. */}
+      <EraLayer boxes={visibleEras} layer="plaque" framed={eraFramed} />
     </g>
 
     </>
