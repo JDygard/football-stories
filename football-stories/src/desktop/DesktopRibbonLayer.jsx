@@ -23,7 +23,7 @@
 // Tapping a ribbon opens its info card (onSelect), guarded by tapGuard so the
 // click that trails a drag is ignored.
 
-import { CONN_W, PEEK, PILL_H } from "./desktopRibbonModel.js";
+import { CONN_W, PEEK, PILL_H, LABEL_MIN_BAND_H } from "./desktopRibbonModel.js";
 import { onColor } from "../palette.js";
 
 const PX_PER_CHAR = 5.8; // rough advance for fontSize 10
@@ -116,6 +116,7 @@ export default function DesktopRibbonLayer({
   railTop = 0,
   slotCount = 0,
   bandH = 16,
+  dropped = 0,
   entryPillY, // (row) => center y of an entry pill row (above the lane)
   exitPillY, // (row) => center y of an exit pill row (below the rail)
   adminById,
@@ -126,6 +127,10 @@ export default function DesktopRibbonLayer({
   if (!ribbons.length || !width) return null;
 
   const railBottom = railTop + slotCount * bandH;
+  // The rail caps concurrent ribbons so every band can still hold its name.
+  // Say what was left out: a cap that silently swallows the track you just
+  // added is indistinguishable from a bug.
+  const overflowNote = dropped > 0 ? `+${dropped} more overlapping — not shown` : null;
   // Slot 0 sits BOTTOM-most (longest tenures hug the outer edge, the desktop
   // counterpart of mobile's rightmost tail slot).
   const bandYOf = (slot) => railTop + (slotCount - 1 - (slot ?? 0)) * bandH;
@@ -230,7 +235,11 @@ export default function DesktopRibbonLayer({
               />
             )}
 
-            {bandH >= 11 && maxChars > 3 && (
+            {/* The floor the model squishes to IS this gate — importing it
+                keeps the two from drifting apart again (they did: a 6px
+                squish floor against an 11px gate silently blanked every
+                label on the rail past 8 concurrent ribbons). */}
+            {bandH >= LABEL_MIN_BAND_H && maxChars > 3 && (
               <text
                 x={labelX}
                 y={bandY + bandH / 2 + 0.5}
@@ -261,6 +270,32 @@ export default function DesktopRibbonLayer({
           </g>
         );
       })}
+
+      {/* Overflow notice. Pinned to the viewport's left edge (scrollX) rather
+          than to content, so it stays put while the timeline scrolls — it is a
+          statement about the rail, not about any year. */}
+      {overflowNote && (
+        <g style={{ pointerEvents: "none" }}>
+          <rect
+            x={scrollX + 8}
+            y={railBottom + 3}
+            width={overflowNote.length * 6.0 + 18}
+            height={14}
+            rx={3}
+            fill="#3a3f47"
+            opacity={0.86}
+          />
+          <text
+            x={scrollX + 14}
+            y={railBottom + 13}
+            fontSize={9.5}
+            fontWeight={600}
+            fill="#fff"
+          >
+            {overflowNote}
+          </text>
+        </g>
+      )}
     </g>
   );
 }

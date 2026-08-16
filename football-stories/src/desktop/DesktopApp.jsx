@@ -59,6 +59,12 @@ const DOCK_SETTINGS_W = 360 // the toggle rows read comfortably at this width
 const SWEEP_OUT_MS = 220
 const SWEEP_IN_MS = 280
 
+// A team PICKED from the drawer sweeps too, but unlike a career follow it has
+// no direction to express — nobody travelled anywhere — so it always travels
+// the same way. Deriving one from alphabetical or division order would be
+// motion the user can't read: it would look meaningful and mean nothing.
+const PICK_SWEEP_DIR = 1
+
 function PanelHeading({ icon, label, badge = null }) {
   return (
     <div
@@ -144,9 +150,25 @@ function DesktopApp() {
   // pointer-down outside THIS, not outside itself (see DesktopTeamDrawer).
   const headerZoneRef = useRef(null);
 
-  // Team switches clear player-ribbon selections (they're per-franchise).
+  // Team switches clear player-ribbon selections (they're per-franchise), and
+  // they SWEEP: the outgoing team leaves the moment you pick, while its
+  // replacement loads, and the new one arrives only once its data is ready.
+  // The OUT phase below already waits on both the animation and the fetch, so
+  // a fast fetch can't cut the motion short and a slow one can't leave a gap —
+  // which is exactly the "out during load, in when ready" behaviour wanted
+  // here, without a spinner.
+  //
+  // Picking is still not a journey the way a career follow is (see goTo), so
+  // it borrows the motion, not the meaning: PICK_SWEEP_DIR is constant.
   const selectTeam = useCallback((team) => {
-    setSelectedTeam(team);
+    setSelectedTeam((prev) => {
+      if (prev !== team) {
+        setSweep({ dir: PICK_SWEEP_DIR, phase: "out" });
+        setOutElapsed(false);
+        setFrozen(liveRef.current);
+      }
+      return team;
+    });
     setRibbonConfig((c) => ({ ...c, players: [] }));
   }, []);
 

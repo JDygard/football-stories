@@ -8,6 +8,7 @@ import {
 } from "../src/desktop/desktopDetail.js";
 import {
   buildDesktopRibbons, stripReserveByYear, CONN_W, BAND_H, MIN_BAND_H,
+  LABEL_MIN_BAND_H, MAX_LABELLED_SLOTS,
   buildPillPlan, layoutPillRows, pillWidth,
 } from "../src/desktop/desktopRibbonModel.js";
 import {
@@ -350,17 +351,39 @@ for (const side of [plan.entryByKey, plan.exitByKey]) {
   }
 }
 
-// squish: 12 concurrent ribbons
-const crowd = Array.from({ length: 12 }, (_, i) => ({
-  admin_person_id: `x${i}`, name: `X${i}`, role: "coach", from: 1991, to: 2018,
-}));
-const rb2 = buildDesktopRibbons({
-  staff: crowd,
-  layout: buildDesktopLayout({ seasons, modules: [], moduleData: {}, reserveByYear: stripReserveByYear(crowd), detailBand: "SEASON_LINES" }),
-});
-ok(rb2.slotCount === 12, `crowd slots = 12 (got ${rb2.slotCount})`);
-ok(rb2.bandH < BAND_H && rb2.bandH >= MIN_BAND_H, `crowd bands squished (bandH=${rb2.bandH})`);
+// CROWDING. The rail caps concurrent ribbons rather than squishing past the
+// point a band can hold its name. This used to allow 16 slots against a 6px
+// floor while the render layer only drew labels at >=11px, so at 9 concurrent
+// ribbons every label on the rail — including the coaches' — silently vanished.
+// The timeline is for reading a few careers, not for stacking a whole roster.
+const buildCrowd = (n) => {
+  const crowd = Array.from({ length: n }, (_, i) => ({
+    admin_person_id: `x${i}`, name: `X${i}`, role: "coach", from: 1991, to: 2018,
+  }));
+  return buildDesktopRibbons({
+    staff: crowd,
+    layout: buildDesktopLayout({ seasons, modules: [], moduleData: {}, reserveByYear: stripReserveByYear(crowd), detailBand: "SEASON_LINES" }),
+  });
+};
+
+// THE INVARIANT: at every reachable slot count, a band can still hold its
+// label. If this fails, names disappear from the rail with no other symptom.
+for (let n = 1; n <= 20; n++) {
+  const rb = buildCrowd(n);
+  ok(rb.bandH >= LABEL_MIN_BAND_H,
+    `${n} concurrent ribbons: bandH ${rb.bandH} still fits a label (>=${LABEL_MIN_BAND_H})`);
+  ok(rb.slotCount <= MAX_LABELLED_SLOTS,
+    `${n} concurrent ribbons: rail caps at ${MAX_LABELLED_SLOTS} slots (got ${rb.slotCount})`);
+}
+
+const rb2 = buildCrowd(12);
+ok(rb2.slotCount === MAX_LABELLED_SLOTS, `12 concurrent -> capped to ${MAX_LABELLED_SLOTS} (got ${rb2.slotCount})`);
+ok(rb2.dropped === 12 - MAX_LABELLED_SLOTS,
+  `the cap REPORTS what it dropped (${rb2.dropped}), so the UI can say so`);
+ok(rb2.ribbons.length === MAX_LABELLED_SLOTS, `only the kept ribbons are returned (${rb2.ribbons.length})`);
+ok(rb2.bandH < BAND_H, `crowd bands still squish toward the floor (bandH=${rb2.bandH})`);
 ok(rb2.railHeight <= 6 * BAND_H, `rail within squish budget (${rb2.railHeight})`);
+ok(buildCrowd(4).dropped === 0, "an uncrowded rail drops nothing");
 
 // ---- NAMED ERAS: curated era rows -> frame boxes ----
 // Synthetic franchise runs 1990..2019, so these cover the three cases the

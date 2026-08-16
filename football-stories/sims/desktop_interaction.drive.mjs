@@ -102,7 +102,16 @@ ok((await card().count()) > 0, "clicking a ribbon opens the info card");
 await closeCard();
 
 // ---- 2. clicking a named draft grade box opens that player's card ----
-const pick = page.locator("text=D. Player").first();
+// The fixture pick is "Draftee Player". It used to render as "D. Player":
+// the compact grade box abbreviated every name unconditionally, and since
+// TODO #21 a name that fits its box is drawn whole.
+//
+// Scope this to real <text> nodes. The grade box has always carried a
+// <title> tooltip holding the FULL name, so now that the painted label is
+// the full name too, a bare `text=Draftee Player` matches both — and
+// `.first()` lands on the <title>, which has no box and cannot be clicked.
+// That failure looks exactly like a broken click handler.
+const pick = page.locator("svg text").filter({ hasText: "Draftee Player" }).first();
 if ((await pick.count()) > 0) {
   const pickBox = await bringIntoView(page, pick, 400);
   if (pickBox) {
@@ -126,7 +135,7 @@ if ((await pick.count()) > 0) {
     await page.waitForTimeout(400);
   }
   const afterRibbon = await card().count();
-  const pick2 = page.locator("text=D. Player").first();
+  const pick2 = page.locator("svg text").filter({ hasText: "Draftee Player" }).first();
   const pick2Box = await bringIntoView(page, pick2, 400);
   if (pick2Box) {
     await page.mouse.click(pick2Box.x + pick2Box.width / 2, pick2Box.y + pick2Box.height / 2);
@@ -367,16 +376,38 @@ const stopRecording = () =>
   await page.waitForTimeout(300);
   ok((await drawer().count()) === 0, "clicking the timeline dismisses the drawer");
 
-  // And picking a team switches, with the chrome held as ever and no sweep.
+  // And picking a team switches, chrome held as ever — and (TODO #19) the
+  // outgoing team now sweeps away DURING the load instead of swapping in
+  // place. This block used to assert the opposite ("no career sweep"), which
+  // was the deliberate behaviour before: a pick was a jump, not a journey.
+  // It still isn't a journey — it borrows the motion, not the meaning, which
+  // is why the direction is always the forward one rather than derived from
+  // anything about the team you picked.
   await tab.click();
   await page.waitForTimeout(300);
   await startRecording();
   await page.locator(".desktop-team-drawer button", { hasText: "Seahawks" }).first().click();
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(1500);
   const rec = await stopRecording();
   ok((await drawer().count()) === 0, "picking a team closes the drawer");
   ok(rec.dockLost === 0, "picking a team from the drawer never drops the chrome");
-  ok(rec.classes.length === 0, "a drawer pick swaps in place — no career sweep");
+  ok(rec.headerLost === 0, "picking a team from the drawer never drops the header");
+  ok(rec.classes.some((c) => c.includes("sweep-out")),
+    `a drawer pick sweeps the old team out (saw ${rec.classes.join(",")})`);
+  ok(rec.classes.some((c) => c.includes("sweep-in")),
+    "a drawer pick sweeps the new team in");
+  const pickOutAt = rec.classes.findIndex((c) => c.includes("sweep-out"));
+  const pickInAt = rec.classes.findIndex((c) => c.includes("sweep-in"));
+  ok(pickOutAt >= 0 && pickInAt > pickOutAt,
+    "the picked team arrives only after the old one has left");
+  const pickOut = travelled(rec, "sweep-out-fwd");
+  const pickIn = travelled(rec, "sweep-in-fwd");
+  ok(pickOut?.up && !pickOut.down,
+    `drawer pick: the old team leaves through the top (${JSON.stringify(pickOut)})`);
+  ok(pickIn?.down && !pickIn.up,
+    `drawer pick: the new team arrives from the bottom (${JSON.stringify(pickIn)})`);
+  ok(!pickOut?.sideways && !pickIn?.sideways,
+    "drawer pick: the sweep is vertical, with no sideways drift");
   ok((await page.locator("body").innerText()).includes("Seahawks"), "the drawer pick switched teams");
 }
 

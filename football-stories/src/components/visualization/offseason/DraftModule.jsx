@@ -21,7 +21,8 @@ import {
   classSummary,
   gradeOf,
   pickLabel,
-  truncate,
+  fitText,
+  shortName,
   measureDraft,
 } from "./draftModel.js";
 
@@ -107,8 +108,17 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
   const star = g.provisional ? "*" : "";
   const color = tierColor(tier);
 
-  const nameMax = Math.max(4, Math.floor((chipX - nameX - 8) / 6));
-  const label = `${p.name || "Unknown"}${p.position ? " · " + p.position : ""}`;
+  // Fit the most informative label the row can actually hold. The position
+  // suffix is the FIRST thing to go, not the last — losing "· WR" costs less
+  // than losing the end of the player's name, which is what a single
+  // truncated "Name · POS" string used to do.
+  const nameW = chipX - nameX - 8;
+  const full = p.name || "Unknown";
+  const label = fitText(
+    [p.position ? `${full} · ${p.position}` : full, full, shortName(full)],
+    nameW,
+    10,
+  );
 
   const midY = y + PICK_ROW_H / 2;
 
@@ -117,13 +127,20 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
       onClick={onSelect}
       style={onSelect ? { cursor: "pointer" } : undefined}
     >
-      {/* row hit target */}
-      <rect x={x} y={y} width={width} height={PICK_ROW_H} fill="transparent" />
+      {/* Row hit target — and the tooltip, so the unabbreviated name is
+          always reachable on hover even when the row had to shorten it.
+          It hangs off the rect rather than the <text> because a <title>
+          inside <text> is still matched by text queries while never being
+          painted, which makes the row's own label ambiguous to anything
+          looking for it. */}
+      <rect x={x} y={y} width={width} height={PICK_ROW_H} fill="transparent">
+        <title>{`${full}${p.position ? ` · ${p.position}` : ""}`}</title>
+      </rect>
       <text x={labelX} y={midY} dominantBaseline="middle" fontSize={10} fill="#666">
         {pickLabel(p)}
       </text>
       <text x={nameX} y={midY} dominantBaseline="middle" fontSize={10} fill="#111">
-        {truncate(label, nameMax)}
+        {label}
       </text>
 
       {/* tier chip */}

@@ -75,8 +75,11 @@ const draftByYear = {};
 for (let y = FIRST; y <= LAST; y++) {
   draftByYear[y] = Array.from({ length: 8 }, (_, i) => ({
     player_id: `p${y}-${i}`, year: y, round: 1 + i, pick_overall: i * 25 + 4,
-    name: i === 0 ? "Odell Beckham Jr." : `Firstname Surname${i}`,
-    position: "WR", value: { score: 40 + i * 6, tier: "BCDAF"[i % 5] },
+    // One name short enough to survive the compact column whole and one that
+    // isn't, so both halves of the fit ladder are exercised at every band.
+    name: i === 0 ? "Ja'Marr Chase" : `Firstname Surname${i}`,
+    position: ["WR", "QB", "RB", "OLB", "TE", "CB", "DE", "G"][i],
+    value: { score: 40 + i * 6, tier: "BCDAF"[i % 5] },
   }));
 }
 const moduleData = {
@@ -246,10 +249,49 @@ for (const band of DESKTOP_BANDS) {
       ok(!!off, `${band}: pill at x=${x} starts at the banner's left gutter`);
       ok(w <= innerW + 1e-6, `${band}: pill ${w}px fits the ${innerW}px banner content width`);
     }
-    // Compact mode is the labeled draft column: header + named grade boxes.
-    if (geom.offseason === "compact") {
+    // ---- THE DRAFT ROW IS THE SAME ROW AT EVERY ZOOM --------------------
+    // It used to be two designs: tier-coloured boxes carrying a name at
+    // SEASON_LINES, transparent rows carrying a pick label and a small grade
+    // chip at the two game bands. Whichever band this is, the row now carries
+    // all four fields — pick number, name, position, grade — so every one of
+    // these assertions runs against every band that shows the draft at all.
+    if (geom.offseason !== "hidden") {
       ok(markup.includes(">DRAFT<"), `${band}: draft section labeled`);
-      ok(markup.includes(">O. Beckham<"), `${band}: grade boxes carry the player's name`);
+
+      // 1. PICK NUMBER. The gutter is the one thing zoom changes: the compact
+      //    column can't afford the round prefix, the full column can. Asserting
+      //    the specific form each way is what stops the fallback from silently
+      //    becoming permanent (or never firing).
+      if (geom.offseason === "compact") {
+        ok(markup.includes(">#4<"), `${band}: pick number on the row`);
+        ok(!markup.includes(">R1 #4<"),
+          `${band}: compact column should drop the round prefix`);
+      } else {
+        ok(markup.includes(">R1 #4<"), `${band}: round + pick number on the row`);
+      }
+
+      // 2. POSITION, in its own slot — never sacrificed to a long name. "OLB"
+      //    is the widest real position and belongs to pick 4, whose name
+      //    ("Firstname Surname3") is too wide to fit: exactly the case the old
+      //    name-suffix ladder used to drop.
+      ok(markup.includes(">OLB<"), `${band}: position rendered beside a name that had to abbreviate`);
+      ok(markup.includes(">QB<"), `${band}: position rendered`);
+
+      // 3. NAME — whole when it fits, initial form when it doesn't. Both
+      //    directions, so neither half can rot into always-abbreviate (which
+      //    is what the old character-counting fit looked like from outside).
+      ok(markup.includes(">Ja&#x27;Marr Chase<") || markup.includes(">Ja'Marr Chase<"),
+        `${band}: a name that fits its row is shown in full`);
+      if (geom.offseason === "compact") {
+        ok(/>F\. Surname\d+</.test(markup),
+          `${band}: a name too wide for the compact row falls back to the initial form`);
+      } else {
+        ok(/>Firstname Surname\d+</.test(markup),
+          `${band}: the full column is wide enough to spell the same name out`);
+      }
+
+      // 4. GRADE, as a letter on the row itself rather than a separate chip.
+      ok(/>A<|>B<|>C<|>D<|>F</.test(markup), `${band}: grade letter on the row`);
     }
   }
 

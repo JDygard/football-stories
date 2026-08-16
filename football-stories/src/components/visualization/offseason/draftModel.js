@@ -137,3 +137,91 @@ export function truncate(str, n) {
   if (!str) return "";
   return str.length > n ? str.slice(0, n - 1) + "…" : str;
 }
+
+// --- name fitting -------------------------------------------------------
+//
+// Fitting a player's name into a draft row means estimating its width: SVG
+// <text> can't be measured before it paints, and this module also has to run
+// headless in the node sims. The estimate used to be a flat "~6px per
+// character", which is wrong in BOTH directions — it clips "Amon-Ra St.
+// Brown" (16 narrow glyphs that easily fit) while letting "Quinnen Williams"
+// overflow (16 wide ones that don't). Per-glyph advances get close enough to
+// choose between candidates honestly, which is the whole job here.
+//
+// Values are Helvetica/Arial advance widths per 1000 units, i.e. multiples of
+// the font size. Anything unlisted falls back to a lowercase average.
+const GLYPH_W = {
+  " ": 0.278, "'": 0.191, "’": 0.191, "-": 0.333, "·": 0.333,
+  ".": 0.278, ",": 0.278, "(": 0.333, ")": 0.333, "…": 1.0,
+  a: 0.556, b: 0.556, c: 0.5, d: 0.556, e: 0.556, f: 0.278, g: 0.556,
+  h: 0.556, i: 0.222, j: 0.222, k: 0.5, l: 0.222, m: 0.833, n: 0.556,
+  o: 0.556, p: 0.556, q: 0.556, r: 0.333, s: 0.5, t: 0.278, u: 0.556,
+  v: 0.5, w: 0.722, x: 0.5, y: 0.5, z: 0.5,
+  A: 0.667, B: 0.667, C: 0.722, D: 0.722, E: 0.667, F: 0.611, G: 0.778,
+  H: 0.722, I: 0.278, J: 0.5, K: 0.667, L: 0.556, M: 0.833, N: 0.722,
+  O: 0.778, P: 0.667, Q: 0.778, R: 0.722, S: 0.667, T: 0.611, U: 0.722,
+  V: 0.667, W: 0.944, X: 0.667, Y: 0.667, Z: 0.611,
+};
+const FALLBACK_GLYPH_W = 0.52;
+
+export function textWidth(str, fontSize = 10) {
+  let w = 0;
+  for (const ch of String(str ?? "")) {
+    w += GLYPH_W[ch] ?? (ch >= "0" && ch <= "9" ? 0.556 : FALLBACK_GLYPH_W);
+  }
+  return w * fontSize;
+}
+
+// "Ja'Marr Chase" -> "J. Chase". A generational suffix isn't the name anyone
+// identifies a player by, so fall back to the token before it.
+export function shortName(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "—";
+  if (parts.length === 1) return parts[0];
+  let last = parts[parts.length - 1];
+  if (parts.length > 2 && /^(jr|sr|ii|iii|iv|v)\.?$/i.test(last)) {
+    last = parts[parts.length - 2];
+  }
+  return `${parts[0][0]}. ${last}`;
+}
+
+// Pick the richest label that actually fits `maxWidth`.
+//
+// Callers pass candidates most- to least-informative ("Ja'Marr Chase · WR",
+// "Ja'Marr Chase", "J. Chase") and get the first that fits, so a name is
+// abbreviated only when the space genuinely demands it and only as far as it
+// demands. That ordering is the point: the old code abbreviated or appended
+// unconditionally, which meant a short name in a wide box still rendered as
+// "J. Chase", and a long name lost its tail to a position suffix that could
+// simply have been dropped instead.
+//
+// If nothing fits, the last candidate is cut to width — measured, not
+// counted — with an ellipsis.
+// The glyph table is Helvetica/Arial; the app may render in whatever the UI
+// sans stack resolves to, which can run a few percent wider. Estimating a
+// touch high is the cheap side of the error — a name that could have fitted
+// gets abbreviated (mildly worse), rather than one that couldn't spilling out
+// of its tier box (visibly broken).
+const FIT_SAFETY = 1.04;
+
+export function fitText(candidates, maxWidth, fontSize = 10) {
+  const list = (Array.isArray(candidates) ? candidates : [candidates])
+    .filter((c) => c != null && c !== "");
+  if (!list.length) return "";
+  for (const c of list) {
+    if (textWidth(c, fontSize) * FIT_SAFETY <= maxWidth) return c;
+  }
+  const last = String(list[list.length - 1]);
+  const budget = maxWidth / FIT_SAFETY;
+  const ellipsisW = textWidth("…", fontSize);
+  if (budget <= ellipsisW) return "";
+  let w = 0;
+  let out = "";
+  for (const ch of last) {
+    const next = w + textWidth(ch, fontSize);
+    if (next + ellipsisW > budget) break;
+    w = next;
+    out += ch;
+  }
+  return out ? out + "…" : "";
+}

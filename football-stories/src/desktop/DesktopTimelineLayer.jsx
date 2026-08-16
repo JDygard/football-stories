@@ -1011,6 +1011,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         railTop={railTop}
         slotCount={ribbonLayout.slotCount}
         bandH={ribbonLayout.bandH}
+        dropped={ribbonLayout.dropped}
         entryPillY={entryPillY}
         exitPillY={exitPillY}
         adminById={adminById}

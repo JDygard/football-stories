@@ -62,10 +62,23 @@ export const BAND_GAP = 0; // bands sit flush; borders delineate
 // from the very next ribbon) keeping the whole rail under ~6 full bands. Past
 // MAX_RAIL_SLOTS the rail is too crowded: stop adding rows, drop the
 // most-overlapping ribbons.
-export const MIN_BAND_H = 6;
+// A band narrower than this cannot hold its label, so DesktopRibbonLayer stops
+// drawing text. That used to be a bare `bandH >= 11` in the render layer while
+// the squish floor here was 6 — two numbers that were never checked against
+// each other, and the gap between them was a cliff: at 9 concurrent ribbons
+// the band hit 10px and EVERY label on the rail switched off at once,
+// including the coaches'. The rail is for reading careers, so the floor and
+// the gate are now the same constant and the render layer imports it.
+export const LABEL_MIN_BAND_H = 11;
+export const MIN_BAND_H = LABEL_MIN_BAND_H;
 const SQUISH_FULL_SLOTS = 4;
 const SQUISH_BUDGET = 6 * BAND_H; // 96px ≈ 6 unsquished bands
-const MAX_RAIL_SLOTS = Math.floor(SQUISH_BUDGET / MIN_BAND_H); // 16
+// Derived, never hand-set: the most rows we can stack while every one of them
+// still fits its name. Capping here rather than squishing further is the
+// deliberate trade — this timeline is for telling a story about a few careers,
+// not for stacking every player who ever suited up.
+export const MAX_LABELLED_SLOTS = Math.floor(SQUISH_BUDGET / LABEL_MIN_BAND_H); // 8
+const MAX_RAIL_SLOTS = MAX_LABELLED_SLOTS;
 // Sliver between the rail's bottom row and the exit pill zone that the
 // "leaving" stubs of exit connectors drop through — the visual cue that a
 // career continues past the rail.
@@ -287,11 +300,15 @@ export function buildDesktopRibbons({
   );
   const slotCount = ribbons.length ? Math.max(...slotMap.values()) + 1 : 0;
 
-  // Too crowded: drop the highest-slot (most-overlapping) ribbons.
+  // Too crowded: drop the highest-slot (most-overlapping) ribbons. `dropped`
+  // is returned so the UI can SAY so — a silent cap reads as a rendering bug
+  // ("why did the ribbon I just added not appear?") rather than a limit.
   let shown = ribbons;
   let slots = slotCount;
+  let dropped = 0;
   if (slotCount > MAX_RAIL_SLOTS) {
     shown = ribbons.filter((r) => (slotMap.get(r.key) ?? 0) < MAX_RAIL_SLOTS);
+    dropped = ribbons.length - shown.length;
     slots = MAX_RAIL_SLOTS;
   }
 
@@ -312,5 +329,5 @@ export function buildDesktopRibbons({
     r.slot = slotMap.get(r.key) ?? 0;
   }
 
-  return { ribbons: shown, railHeight, slotCount: slots, bandH };
+  return { ribbons: shown, railHeight, slotCount: slots, bandH, dropped };
 }
