@@ -31,7 +31,7 @@ export {
 // --- column geometry (measure and render must agree on these) ---
 export const HEADER_ROW_H = 18; // header strip at the top of the column
 export const PICK_ROW_H = 16; // one pick per row, stacked down the column
-export const FULL_COL_W = 176; // full mode: label + name + score bar + chip
+export const FULL_COL_W = 176; // full mode: label + name + grade chip
 
 // Compact mode (zoom 2, "Seasons"). This used to be an unlabeled 18px strip of
 // bare tier-colored squares: you could see that a class graded well, with no

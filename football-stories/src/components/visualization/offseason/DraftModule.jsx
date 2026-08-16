@@ -101,16 +101,13 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
   const right = x + width;
   const chipW = 20;
   const chipX = right - 6 - chipW;
-  const scoreBarW = 34;
-  const scoreBarX = chipX - 8 - scoreBarW;
 
   const g = gradeOf(p.value, adjusted);
-  const score = g.score;
   const tier = g.tier;
   const star = g.provisional ? "*" : "";
   const color = tierColor(tier);
 
-  const nameMax = Math.max(4, Math.floor((scoreBarX - nameX - 6) / 6));
+  const nameMax = Math.max(4, Math.floor((chipX - nameX - 8) / 6));
   const label = `${p.name || "Unknown"}${p.position ? " · " + p.position : ""}`;
 
   const midY = y + PICK_ROW_H / 2;
@@ -128,19 +125,6 @@ function PickRow({ p, x, width, y, onSelect, adjusted }) {
       <text x={nameX} y={midY} dominantBaseline="middle" fontSize={10} fill="#111">
         {truncate(label, nameMax)}
       </text>
-
-      {/* score bar (proportional to 0-100 percentile score) */}
-      <rect x={scoreBarX} y={midY - 3} width={scoreBarW} height={6} fill="#eee" rx={1} />
-      {score != null && (
-        <rect
-          x={scoreBarX}
-          y={midY - 3}
-          width={(scoreBarW * Math.max(0, Math.min(100, score))) / 100}
-          height={6}
-          fill={color}
-          rx={1}
-        />
-      )}
 
       {/* tier chip */}
       <rect x={chipX} y={midY - 7} width={chipW} height={14} rx={2} fill={color} />
