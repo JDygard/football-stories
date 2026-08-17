@@ -38,6 +38,8 @@ const DesktopMain = forwardRef(function DesktopMain(
     onFocusConsumed,
     ribbonConfig = { roles: {}, players: [] },
     onFollow,
+    onFocusEra,
+    focusedEraId = null,
   },
   externalRef,
 ) {
@@ -164,6 +166,17 @@ const DesktopMain = forwardRef(function DesktopMain(
   // ribbon entry connectors (staff + players) so they occupy layout space.
   const reserveByYear = useMemo(() => stripReserveByYear(spans), [spans]);
 
+  // The chapter the viewport needs to know about, so it can reserve whitespace
+  // for a blurb that won't fit. Only the selected one ever does.
+  const selectedEra = useMemo(() => {
+    if (!focusedEraId) return null;
+    const era = (eras || []).find((e) => e.id === focusedEraId);
+    if (!era?.blurb) return null;
+    const years = (mapped?.seasons || []).map((x) => x.year);
+    const last = era.end == null ? Math.max(...years) : era.end;
+    return { id: era.id, era, blurb: era.blurb, lastYear: last };
+  }, [focusedEraId, eras, mapped]);
+
   const viewport = useDesktopViewport({
     seasons: mapped?.seasons,
     modules,
@@ -173,11 +186,24 @@ const DesktopMain = forwardRef(function DesktopMain(
     focusYear,
     onFocusConsumed,
     showPlayoffs,
+    selectedEra,
   });
   const {
     layout, scrollX, band, handlers, didDrag, visualScale, scaleAnchorX,
     scrollRef, totalWidth,
   } = viewport;
+
+  // Clicking an era plaque tells the shell to highlight who made that chapter.
+  // It deliberately does NOT move the viewport: an auto-zoom was tried
+  // (2026-08-16) and removed on the user's call. Selecting a chapter's cast and
+  // deciding where you're looking are separate acts, and only the first one is
+  // the click's business.
+  const handleFocusEra = useCallback(
+    (box) => {
+      if (onFocusEra) onFocusEra(box);
+    },
+    [onFocusEra],
+  );
   didDragRef.current = didDrag;
 
   // Expose the native scroll container (Header reads scrollTop to hide/show;
@@ -345,6 +371,8 @@ const DesktopMain = forwardRef(function DesktopMain(
                   onFollow={onFollow}
                   showWinRate={showWinRate}
                   showPlayoffs={showPlayoffs}
+                  onFocusEra={handleFocusEra}
+                  focusedEraId={focusedEraId}
                 />
               </g>
             </svg>

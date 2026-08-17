@@ -34,6 +34,7 @@ import {
 } from "react";
 import { buildDesktopLayout } from "./buildDesktopLayout.js";
 import { DESKTOP_BANDS } from "./desktopDetail.js";
+import { buildEraBoxes, blurbPadFor } from "./desktopEraModel.js";
 import { clamp, expSmooth, pickBand, visualScaleFor } from "../hooks/zoomMath.js";
 
 // DESKTOP_BANDS, not DETAIL_BANDS: the desktop ladder is exactly the four
@@ -57,6 +58,12 @@ export default function useDesktopViewport({
   focusYear = null,
   onFocusConsumed = null,
   showPlayoffs = true,
+  // The selected Named Era, when one is picked: { id, lastYear, blurb }. A
+  // chapter too narrow to hold a readable blurb line gets whitespace reserved
+  // after its last season. Computed HERE because this hook owns the layouts —
+  // deriving the pad in a consumer would mean measuring a padded layout to
+  // decide the pad, which oscillates.
+  selectedEra = null,
 }) {
   const [bandIndex, setBandIndex] = useState(initialBandIndex);
   // scrollX mirrors the scroll container's scrollLeft (set from scroll events).
@@ -71,22 +78,34 @@ export default function useDesktopViewport({
   // Precompute every band's layout once; switching bands is a pure index change.
   // `width` is a dependency because the Eras band is fit-to-viewport — a window
   // resize genuinely changes its geometry, unlike the other three.
-  const layouts = useMemo(
-    () =>
-      DESKTOP_BANDS.map((band) =>
-        buildDesktopLayout({
-          seasons,
-          modules,
-          moduleData,
-          reserveByYear,
-          detailBand: band,
-          left: 0,
-          fitWidth: width,
-          showPlayoffs,
-        }),
-      ),
-    [seasons, modules, moduleData, reserveByYear, width, showPlayoffs],
-  );
+  const layouts = useMemo(() => {
+    const build = (band, padAfterYear) =>
+      buildDesktopLayout({
+        seasons,
+        modules,
+        moduleData,
+        reserveByYear,
+        padAfterYear,
+        detailBand: band,
+        left: 0,
+        fitWidth: width,
+        showPlayoffs,
+      });
+
+    return DESKTOP_BANDS.map((band) => {
+      const base = build(band, undefined);
+      if (!selectedEra?.blurb || selectedEra.lastYear == null) return base;
+      // Measure the chapter on the UNPADDED layout, then rebuild once. The
+      // pad is never fed back in, so there's no loop.
+      const boxes = buildEraBoxes({
+        eras: [selectedEra.era],
+        layout: base,
+      });
+      const pad = blurbPadFor(boxes[0]);
+      if (!pad) return base;
+      return build(band, { [selectedEra.lastYear]: pad });
+    });
+  }, [seasons, modules, moduleData, reserveByYear, width, showPlayoffs, selectedEra]);
   const bandWidths = useMemo(
     () => layouts.map((l) => Math.max(1, l.totalWidth)),
     [layouts],

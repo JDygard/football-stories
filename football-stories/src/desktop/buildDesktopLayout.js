@@ -98,6 +98,11 @@ export function buildDesktopLayout({
   modules = [],
   moduleData = {},
   reserveByYear = {},
+  // { year: px } — whitespace appended AFTER that year's season block. Used to
+  // give a selected era room for its blurb without letting the frame overlap
+  // the chapter that follows: the era still covers exactly its own years, and
+  // the extra is empty paper inside the frame.
+  padAfterYear = {},
   detailBand = DEFAULT_BAND,
   left = 0,
   seasonPadding = 6,
@@ -247,12 +252,17 @@ export function buildDesktopLayout({
       gamePositions = games.map((g, i) => ({ g, i, x: lineX }));
     }
     const seaX1 = seaX0 + seaWidth;
+    const padAfter = Math.max(0, padAfterYear[year] || 0);
 
     const seaBlock = {
       type: "season",
       year,
       x0: seaX0,
       x1: seaX1,
+      // Empty paper after the games, owned by the season block so the era
+      // frame can reach across it (see buildEraBoxes). NOT part of x1: the
+      // games must not stretch into it.
+      padAfter,
       width: seaWidth,
       postseason,
       tStart: year,
@@ -264,7 +274,7 @@ export function buildDesktopLayout({
       season: s,
     };
     blocks.push(seaBlock);
-    x = seaX1;
+    x = seaX1 + padAfter;
 
     byYear.set(year, { offseason: offBlock, season: seaBlock });
   }

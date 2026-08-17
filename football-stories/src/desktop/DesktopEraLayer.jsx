@@ -31,6 +31,9 @@
 
 import { memo } from "react";
 import {
+  ERA_BLURB_FS,
+  ERA_BLURB_LH,
+  ERA_BLURB_BASELINE,
   ERA_HEADER_H,
   ERA_LABEL_BASELINE,
   ERA_RECORD_FS,
@@ -86,6 +89,9 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
   top,
   bottom,
   layer = "frame",
+  onFocusEra = null,
+  focusedEraId = null,
+  tapGuard = null,
 }) {
   if (!boxes?.length) return null;
   const height = Math.max(0, bottom - top);
@@ -144,8 +150,46 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
       <g style={{ pointerEvents: "none" }}>
         {boxes.map((b) => {
           const t = tone(b.tone % ERA_TONE_COUNT);
+          const focused = focusedEraId === b.id;
           return (
             <g key={b.id}>
+              {/* HIT TARGET for focusing the chapter. It lives in this pass
+                  because this pass paints last — a target under the ribbons
+                  would be shadowed by every tenure band crossing the plaque.
+                  Only the plaque band is clickable, not the whole frame: the
+                  frame's interior is the timeline, and stealing clicks there
+                  would break every draft box and ribbon inside it. */}
+              {onFocusEra && (
+                <rect
+                  x={b.x0}
+                  y={top}
+                  width={b.width}
+                  height={ERA_HEADER_H}
+                  data-era-hit={b.id}
+                  fill="transparent"
+                  style={{ pointerEvents: "auto", cursor: "pointer" }}
+                  onClick={(e) => {
+                    if (tapGuard && tapGuard()) return;
+                    e.stopPropagation();
+                    onFocusEra(b);
+                  }}
+                >
+                  <title>{`Focus ${b.label || b.yearsText}`}</title>
+                </rect>
+              )}
+              {focused && (
+                <rect
+                  x={b.x0 + BORDER_W / 2}
+                  y={top + BORDER_W / 2}
+                  width={Math.max(0, b.width - BORDER_W)}
+                  height={Math.max(0, ERA_HEADER_H - BORDER_W / 2)}
+                  data-era-focused={b.id}
+                  rx={6}
+                  fill={t.border}
+                  fillOpacity={0.14}
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {/* The frame itself, over the content it encloses — including
                   the rail's opaque tenure bands at the bottom. Unfilled: the
                   wash pass already laid the tint down underneath. */}
@@ -239,6 +283,30 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   {b.labelText}
                 </text>
               )}
+
+              {/* THE BLURB — only on the selected chapter. The wall label
+                  gains its paragraph when you pick it; every frame carrying
+                  prose at all times would turn the timeline into a page of
+                  text. Haloed like the rest of the plaque text because ribbon
+                  connectors drop through this band. */}
+              {focused &&
+                b.blurbLines?.map((line, i) => (
+                  <text
+                    key={i}
+                    x={b.blurbX}
+                    y={top + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
+                    data-era-blurb={b.id}
+                    fontSize={ERA_BLURB_FS}
+                    textAnchor="start"
+                    fill={ERA_INK}
+                    stroke={t.header}
+                    strokeWidth={2.5}
+                    paintOrder="stroke"
+                    style={{ letterSpacing: 0.1 }}
+                  >
+                    {line}
+                  </text>
+                ))}
             </g>
           );
         })}

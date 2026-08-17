@@ -121,6 +121,9 @@ function DesktopApp() {
   const [focusYear, setFocusYear] = useState(null);
   // Career-follow handoff (see App.jsx).
   const [pendingFollow, setPendingFollow] = useState(null);
+  // Which Named Era chapter is currently focused (clicked plaque). The zoom
+  // itself lives in the viewport; this is only the selection.
+  const [focusedEraId, setFocusedEraId] = useState(null);
 
   // Career-follow sweep: { dir, phase }. dir is +1 (following someone onward —
   // the destination is below, so the view exits upward) or -1 (following them
@@ -144,6 +147,13 @@ function DesktopApp() {
   const [frozen, setFrozen] = useState(null);
   const liveRef = useRef({ mapped, draftSegment, erasSegment });
   liveRef.current = { mapped, draftSegment, erasSegment };
+
+  // Read-latest refs for the era-focus handler, which runs from a click and an
+  // async fetch and must not close over a stale team or segment.
+  const erasRef = useRef(erasSegment);
+  erasRef.current = erasSegment;
+  const selectedTeamRef = useRef(selectedTeam);
+  selectedTeamRef.current = selectedTeam;
 
   const mainRef = useRef(null);
   // The header row + team drawer together; the drawer dismisses on a
@@ -170,6 +180,7 @@ function DesktopApp() {
       return team;
     });
     setRibbonConfig((c) => ({ ...c, players: [] }));
+    setFocusedEraId(null);
   }, []);
 
   const goTo = useCallback((team, year, follow = null, dir = 0) => {
@@ -200,6 +211,60 @@ function DesktopApp() {
       return team;
     });
   }, []);
+  // ERA FOCUS. Clicking a chapter's plaque maximizes it (DesktopMain drives the
+  // zoom) and puts its cast on the rail.
+  //
+  // Highlights are matched by NAME against this team's own tenure rows, never
+  // by player_id_internal: those ids are a uuid5 of the identity key, so every
+  // improvement to identity matching rewrites them and would silently empty
+  // every authored story. A name plus the team's tenures survives that.
+  //
+  // The stint chosen for a name is the one that actually overlaps the era —
+  // a player can have several stints with one franchise, and the chapter means
+  // the one inside it.
+  const focusEra = useCallback((box) => {
+    setFocusedEraId(box?.id ?? null);
+    const era = (erasRef.current?.eras || []).find((e) => e.id === box?.id);
+    const wanted = (era?.highlights || []).filter((h) => h.kind !== "staff");
+    if (!wanted.length) return;
+
+    const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const names = new Set(wanted.map((h) => norm(h.name)));
+    const team = selectedTeamRef.current;
+    fetch(`/data/segments/teams_tenures/${team}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!json || selectedTeamRef.current !== team) return;
+        const overlaps = (t) =>
+          t.from != null && t.to != null && t.from <= box.end && t.to >= box.start;
+        const picked = [];
+        for (const want of wanted) {
+          const rows = (json.tenures || []).filter(
+            (t) => norm(t.name) === norm(want.name) && t.conf !== "low",
+          );
+          const hit = rows.find(overlaps) || rows[0];
+          if (!hit) continue;
+          const id = hit.player_id_internal || hit.player_id;
+          picked.push({
+            key: `${id}:${hit.from}:${hit.to}`,
+            player_id: id,
+            name: hit.name,
+            position: hit.position,
+            from: hit.from,
+            to: hit.to,
+            source: hit.source,
+            prev_team: hit.prev_team,
+            next_team: hit.next_team,
+            entry: hit.entry,
+            exit: hit.exit,
+            conf: hit.conf,
+          });
+        }
+        if (picked.length) setRibbonConfig((c) => ({ ...c, players: picked }));
+      })
+      .catch(() => {});
+  }, []);
+
   const clearFocus = useCallback(() => setFocusYear(null), []);
 
   // ---- SWEEP state machine ----
@@ -365,6 +430,8 @@ function DesktopApp() {
               onFocusConsumed={clearFocus}
               ribbonConfig={ribbonConfig}
               onFollow={goTo}
+              onFocusEra={focusEra}
+              focusedEraId={focusedEraId}
             />
           )}
         </div>

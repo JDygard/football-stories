@@ -666,6 +666,8 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   onFollow,
   showWinRate = true,
   showPlayoffs = true,
+  onFocusEra = null,
+  focusedEraId = null,
 }) {
   const ribbonLayout = useMemo(
     () => buildDesktopRibbons({ staff, layout }),
@@ -688,8 +690,11 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   // off it sits where it always did, directly above the lane — the whole
   // reorder is conditional so the game zooms are untouched.
   const eraBoxes = useMemo(
-    () => (eras?.length ? buildEraBoxes({ eras, layout }) : []),
-    [eras, layout],
+    () =>
+      eras?.length
+        ? buildEraBoxes({ eras, layout, selectedId: focusedEraId })
+        : [],
+    [eras, layout, focusedEraId],
   );
   const showEras = eraBoxes.length > 0 && ERA_FRAME_BANDS.has(band);
 
@@ -714,6 +719,8 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   // The era header strip is a REAL ROW in the assembly, not an overlay: it buys
   // its height from the same budget as everything else, so era titles sit above
   // the timeline instead of on top of it.
+  // Constant. The blurb sets in a column beside the wall label and uses the
+  // band's HEIGHT, so selecting a chapter never reflows the timeline vertically.
   const eraZoneH = showEras ? ERA_HEADER_H : 0;
   // A crown rises CROWN_ZONE above the lane. With eras on that fits inside the
   // header band's own bottom air — the band is 132 tall and its text stops at
@@ -916,6 +923,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
           top={eraTop}
           bottom={eraBottom}
           layer="wash"
+          focusedEraId={focusedEraId}
         />
       )}
 
@@ -1033,6 +1041,9 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
           top={eraTop}
           bottom={eraBottom}
           layer="plaque"
+          onFocusEra={onFocusEra}
+          focusedEraId={focusedEraId}
+          tapGuard={tapGuard}
         />
       )}
 

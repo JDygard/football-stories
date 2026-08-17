@@ -42,6 +42,33 @@ export const ERA_LABEL_BASELINE = 68;
 // is 132 tall with the title baseline at 68, so this sits in air that already
 // existed.
 export const ERA_RECORD_BASELINE = 92;
+
+// ---- the blurb, shown only on the SELECTED chapter -------------------------
+// The wall label gains its paragraph when you pick the chapter, and only then:
+// every frame carrying its prose at all times would turn the timeline into a
+// page of text.
+export const ERA_BLURB_FS = 12.5;
+export const ERA_BLURB_LH = 15.5;
+// The paragraph is a COLUMN to the RIGHT of the wall label, not a band under
+// it. Set across the frame it becomes a 3,900px line — technically inside the
+// box and unreadable, because measure, not width, is what makes prose legible.
+// So it gets a fixed measure and uses the plaque's HEIGHT instead, which is
+// also why a wide chapter and a narrow one read the same.
+export const ERA_BLURB_COL_W = 380;    // ~60 characters at 12.5px
+export const ERA_BLURB_GUTTER = 36;    // clear air after the title zone
+export const ERA_BLURB_BASELINE = 30;  // first baseline, level with the eyebrow
+// A column narrower than this is a stack of two-word lines; better to reserve
+// width (blurbPadFor) than to print that.
+export const ERA_BLURB_MIN_COL_W = 200;
+// However many lines the band's height actually holds — the paragraph fills the
+// plaque and stops, rather than the plaque growing to fit the paragraph.
+export const ERA_BLURB_MAX_LINES =
+  Math.floor((ERA_HEADER_H - ERA_BLURB_BASELINE - 10) / ERA_BLURB_LH) + 1;
+// A chapter narrower than this can't hold a readable line, so the layout
+// reserves whitespace after its last season to make up the difference (see
+// blurbPadFor). Below ~300px the prose wraps to a column of two-word lines,
+// which reads worse than not showing it.
+
 export const ERA_RECORD_FS = 12.5;
 // Gap between the title and the record when the two share a line.
 const RECORD_INLINE_GAP = 12;
@@ -101,7 +128,13 @@ const CHAR_W = { serif: 0.5, serifWide: 0.62, sans: 0.55, bold: 0.58 };
 // with room to spare, while "Mmm" would have measured short. Rough classes are
 // enough — this only has to decide whether a string fits, not lay it out.
 const charUnits = (ch) => {
-  if (" .,'’!:;|-–—".includes(ch)) return 0.32;
+  // An EM DASH is a full em wide and an en dash half of one — they were in
+  // this narrow class with commas and periods, which made any line containing
+  // one measure ~0.7em short. Harmless in a title; in a wrapped paragraph it
+  // put the line through the frame's right border.
+  if (ch === "—") return 1.5;
+  if (ch === "–") return 0.9;
+  if (" .,'’!:;|-".includes(ch)) return 0.32;
   if ("iljI".includes(ch)) return 0.36;
   if ("ftr".includes(ch)) return 0.44;
   if ("MW".includes(ch)) return 1.55;
@@ -149,7 +182,67 @@ export function eraYearsLabel(era) {
 // range can legitimately run past the last played season (an ongoing era) or
 // start before the data does, and neither should produce a frame hanging off
 // the end of the timeline. An era with no seasons on screen at all is dropped.
-export function buildEraBoxes({ eras, layout }) {
+// The estimator's `sans` constant is tuned for "does this fit" on SHORT
+// strings, where under-measuring by a few px costs nothing. Wrapping a
+// paragraph compounds that error along the whole line, and the failure mode is
+// text running out through the frame's right border. So wrapping measures
+// pessimistically — the same two-constants-for-two-questions rule the title
+// and record already follow (see estimateTextWidth's note).
+// 1.22, not 1.14. The estimator is calibrated against the UI sans the app gets
+// on Windows (Segoe UI); `system-ui` resolves to something appreciably wider on
+// other platforms, and a wrapped paragraph has no ellipsis to hide behind — the
+// line simply crosses the frame's right border into the next chapter. Losing a
+// word per line is the cheap side of that trade.
+const BLURB_WRAP_PESSIMISM = 1.22;
+
+// Greedy word wrap against the estimator. Returns [] when there's no room.
+export function wrapBlurb(text, innerW, maxLines = ERA_BLURB_MAX_LINES) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length || !(innerW > 0)) return [];
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    const nextW = estimateTextWidth(next, ERA_BLURB_FS, "sans") * BLURB_WRAP_PESSIMISM;
+    if (nextW <= innerW || !line) {
+      line = next;
+      continue;
+    }
+    lines.push(line);
+    line = w;
+    if (lines.length === maxLines) break;
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  // Ran out of lines with words left: mark the truncation rather than ending
+  // the paragraph mid-sentence as if that were the whole thought.
+  const used = lines.join(" ").split(/\s+/).length;
+  if (used < words.length && lines.length) {
+    lines[lines.length - 1] = lines[lines.length - 1].replace(/[,;:]?$/, "") + "…";
+  }
+  return lines;
+}
+
+/**
+ * Extra width a chapter needs before its blurb column will fit.
+ *
+ * Returns px to reserve AFTER the era's last season — the layout grows into
+ * whitespace rather than the frame overlapping its neighbour, so the chapter
+ * still reads as covering exactly the years it covers. The requirement is the
+ * wall label's own width plus a gutter plus a full measure; anything less and
+ * the prose would set too narrow to read.
+ */
+export function blurbPadFor(box) {
+  if (!box?.blurb) return 0;
+  const need =
+    ERA_TEXT_INSET +
+    (box.titleZoneW || 0) +
+    ERA_BLURB_GUTTER +
+    ERA_BLURB_COL_W +
+    LABEL_PAD_R;
+  return box.width >= need ? 0 : Math.ceil(need - box.width);
+}
+
+export function buildEraBoxes({ eras, layout, selectedId = null }) {
   if (!eras?.length || !layout?.byYear?.size) return [];
 
   const years = [...layout.byYear.keys()].sort((a, b) => a - b);
@@ -166,7 +259,10 @@ export function buildEraBoxes({ eras, layout }) {
     for (const y of years) if (y >= start && y <= end) lastYear = y;
 
     const x0 = layout.byYear.get(firstYear).offseason.x0;
-    const x1 = layout.byYear.get(lastYear).season.x1;
+    // Reach across any whitespace reserved after the last season: that paper
+    // was added FOR this frame's blurb, so it belongs inside the frame.
+    const lastSeason = layout.byYear.get(lastYear).season;
+    const x1 = lastSeason.x1 + (lastSeason.padAfter || 0);
     const width = x1 - x0;
 
     // Fit the title, then fall back to the authored short form, then to
@@ -206,8 +302,38 @@ export function buildEraBoxes({ eras, layout }) {
       !!labelText && !!recordText &&
       (recordInline || recordW <= width - ERA_TEXT_INSET - YEARS_PAD_R);
 
+    const boxId = era.id || `${era.start}-${end}`;
+
+    // How much horizontal room the WALL LABEL occupies, measured
+    // pessimistically — the blurb column starts after this, so under-measuring
+    // would set the paragraph on top of the title.
+    const yearsW = showYears
+      ? estimateTextWidth(yearsText, ERA_YEARS_FS, "sans", ERA_YEARS_TRACKING)
+      : 0;
+    const titleRowW = recordInline
+      ? labelEndW + RECORD_INLINE_GAP + recordW
+      : Math.max(labelEndW, showRecord ? recordW : 0);
+    const titleZoneW = Math.max(yearsW, titleRowW, ERA_RULE_W);
+
+    // The blurb column: to the RIGHT of the label, at a fixed measure, using
+    // the plaque's height. It is never set wider than ERA_BLURB_COL_W however
+    // wide the chapter is — a 60-character line is the readable unit, and a
+    // 3,900px one is not a paragraph.
+    const blurbX = x0 + ERA_TEXT_INSET + titleZoneW + ERA_BLURB_GUTTER;
+    const blurbW = Math.min(ERA_BLURB_COL_W, x1 - LABEL_PAD_R - blurbX);
+    const selected = selectedId && boxId === selectedId;
+    const blurbLines =
+      selected && era.blurb && blurbW >= ERA_BLURB_MIN_COL_W
+        ? wrapBlurb(era.blurb, blurbW)
+        : [];
+
     boxes.push({
-      id: era.id || `${era.start}-${end}`,
+      blurb: era.blurb || null,
+      blurbLines,
+      titleZoneW,
+      blurbX,
+      blurbW,
+      id: boxId,
       label: era.label,
       labelText,
       yearsText,
