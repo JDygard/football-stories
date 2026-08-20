@@ -19,6 +19,7 @@ import {
   maxStackHeight,
   positionGroup,
 } from "./visualization/staffRibbonModel.js";
+import { eraBlurbLayout } from "./visualization/eraModel.js";
 
 const Main = forwardRef(function Main(
   {
@@ -31,6 +32,11 @@ const Main = forwardRef(function Main(
     onFocusConsumed,
     ribbonConfig = { roles: {}, players: [] },
     onFollow,
+    // Named Era selection lives in App, because opening a chapter also turns on
+    // the personnel ribbons of the people who made it — and those are App's
+    // ribbonConfig. Main only reserves the room and routes the tap.
+    onFocusEra,
+    focusedEraId = null,
   },
   externalRef,
 ) {
@@ -111,14 +117,16 @@ const Main = forwardRef(function Main(
     [draftSegment, expandedDraftYears, onToggleDraftYear, onSelectPick, tapGuard, adjustedGrades],
   );
 
-  // ---- ribbon spans: staff (role-filtered) + selected player tenures ----
+  // ---- ribbon spans: every selected track, staff and players alike ----
   const spans = useMemo(() => {
     const out = [];
-    for (const s of mapped?.staff || []) {
-      if (ribbonConfig.roles?.[s.role] === false) continue;
-      out.push(s);
-    }
     for (const p of ribbonConfig.players || []) {
+      // Staff rows carry their segment row whole (entry/exit, prev/next team),
+      // so the ribbon layer needs nothing added but the id it keys on.
+      if (p.kind === "staff") {
+        out.push({ ...p, admin_person_id: p.player_id });
+        continue;
+      }
       out.push({
         admin_person_id: p.player_id,
         name: p.name,
@@ -146,6 +154,19 @@ const Main = forwardRef(function Main(
   // range needs slack for the worst case or the last rows can't be reached.
   const ribbonSlack = useMemo(() => maxStackHeight(spans), [spans]);
 
+  // The open chapter's plaque has to grow before the layout runs, so its
+  // paragraph is measured HERE — against screen width alone, which is the one
+  // thing both this and the renderer can agree on (see eraBlurbMeasure). The
+  // result is a stable map so a layout rebuild only happens when the selection
+  // or the width genuinely changes.
+  const eraHeaderExtra = useMemo(() => {
+    if (!focusedEraId || !eras?.length || !width) return null;
+    const era = eras.find((e) => e.id === focusedEraId);
+    if (!era?.blurb) return null;
+    const { extraH } = eraBlurbLayout(era.blurb, width);
+    return extraH ? { [focusedEraId]: extraH } : null;
+  }, [focusedEraId, eras, width]);
+
   const viewport = useTimelineViewport({
     seasons: mapped?.seasons,
     modules,
@@ -157,6 +178,7 @@ const Main = forwardRef(function Main(
     onFocusConsumed,
     showPlayoffs,
     eras,
+    eraHeaderExtra,
   });
   const {
     layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY,
@@ -267,6 +289,8 @@ const Main = forwardRef(function Main(
                     onFollow={onFollow}
                     showWinRate={showWinRate}
                     showPlayoffs={showPlayoffs}
+                    onFocusEra={onFocusEra}
+                    focusedEraId={focusedEraId}
                   />
                 </g>
               </g>

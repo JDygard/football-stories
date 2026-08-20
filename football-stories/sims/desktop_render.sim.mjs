@@ -343,7 +343,10 @@ for (const band of DESKTOP_BANDS) {
   }
 
   // ---- NAMED ERAS ----
-  // Frames only at the two coarsest rungs, where a whole era fits on screen.
+  // The chapter is named, washed AND framed at EVERY rung — plaque, wall label,
+  // interior tint and border, all four bands. What handles a border whose
+  // vertical edges are off-screen at a fine zoom is not dropping it (the top
+  // and bottom edges are what you read there) but the sliding wall label.
   const eraHeaders = [...markup.matchAll(
     new RegExp(
       `<rect x="([\\d.]+)" y="([\\d.]+)" width="([\\d.]+)" height="${ERA_HEADER_H}" data-era-header="([^"]+)"`,
@@ -351,11 +354,10 @@ for (const band of DESKTOP_BANDS) {
     ),
   )];
   const eraWashes = [...markup.matchAll(/data-era-wash="([^"]+)"/g)];
-  const eraBands = band === "ERA_SUMMARY" || band === "SEASON_LINES";
-  if (!eraBands) {
-    ok(eraHeaders.length === 0, `${band}: no era frames at the game zooms`);
-    ok(!markup.includes(">The Middle Distance<"), `${band}: no era titles at the game zooms`);
-  } else {
+  const eraBorders = [...markup.matchAll(/data-era-frame="([^"]+)"/g)];
+  ok(eraBorders.length === eras.length,
+    `${band}: ${eraBorders.length} era borders, expected ${eras.length}`);
+  {
     ok(eraHeaders.length === eras.length,
       `${band}: one frame per era (${eraHeaders.length} of ${eras.length})`);
     ok(eraWashes.length === eras.length,
@@ -478,55 +480,61 @@ for (const band of DESKTOP_BANDS) {
     ok(!sortedHeaders.some((hd) => gapMid > hd.x && gapMid < hd.x + hd.w),
       `${band}: an unauthored stretch of years has no frame`);
 
-    // ---- the frame's vertical extent ----
-    // A chapter encloses its whole seasons AND the personnel rail's tenure
-    // bands — the people who served in an era are inside its frame — but stops
-    // at the bottom of the last band. Below that is the peek and the exit
-    // pills: a career leaving, which belongs to the person, not to the chapter
-    // they're walking out of.
-    const frameRects = [...markup.matchAll(
-      /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" data-era-frame="/g,
-    )].map((m) => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }));
-    ok(frameRects.length === eras.length,
-      `${band}: one bordered frame per era (${frameRects.length})`);
-    const frameTop = Math.min(...frameRects.map((f) => f.y));
-    const frameBottom = Math.max(...frameRects.map((f) => f.y + f.h));
-    const railZoneM = /<rect x="0" y="([\d.]+)" width="[\d.]+" height="([\d.]+)" fill="#eceef3"/
-      .exec(markup);
-    const railTopY = +railZoneM[1];
-    const railZoneBottom = railTopY + +railZoneM[2];
-    // The zone runs PEEK + 4 past the last band, so that's where the bands end.
-    const lastBandBottom = railZoneBottom - PEEK - 4;
-    ok(frameBottom > railTopY,
-      `${band}: frame reaches down INTO the personnel rail (${frameBottom.toFixed(1)} vs ${railTopY})`);
-    // frameBottom is the stroke's CENTRELINE; what has to clear the bands is
-    // its near edge, and what has to stay inside the rail zone is its far one.
-    const borderNear = frameBottom - ERA_BORDER_W / 2;
-    const borderFar = frameBottom + ERA_BORDER_W / 2;
-    ok(borderNear - lastBandBottom >= ERA_RAIL_GAP - 0.01,
-      `${band}: ${(borderNear - lastBandBottom).toFixed(2)}px clear below the last band (want >= ${ERA_RAIL_GAP})`);
-    ok(borderNear - lastBandBottom < ERA_RAIL_GAP + 2,
-      `${band}: …and not a yawning gap (${(borderNear - lastBandBottom).toFixed(2)}px)`);
-    ok(borderFar <= railZoneBottom + 0.01,
-      `${band}: …and stops above the exit peek (${borderFar.toFixed(1)} vs ${railZoneBottom.toFixed(1)})`);
-    // Ribbons ARRIVE from outside the frame: every ribbon path starts at
-    // "M x topY", and the topmost of those is above the frame's top edge.
-    const ribbonTops = [...markup.matchAll(/ d="M ([\d.-]+) ([\d.-]+)/g)].map((m) => +m[2]);
-    ok(ribbonTops.length > 0, `${band}: ribbons rendered`);
-    ok(Math.min(...ribbonTops) < frameTop,
-      `${band}: incoming ribbons enter from above the frame (${Math.min(...ribbonTops).toFixed(1)} vs ${frameTop.toFixed(1)})`);
-    // PAINT ORDER: because those connectors drop straight through the plaque
-    // band, the label has to be painted AFTER the last ribbon path — and
-    // haloed — or an opaque connector strikes a title clean through. Same
-    // requirement the year axis has.
     const lastRibbonAt = markup.lastIndexOf('<path');
     const firstTitleAt = markup.indexOf('data-era-title=');
     ok(firstTitleAt > lastRibbonAt,
       `${band}: era labels paint after the ribbons (ribbon@${lastRibbonAt}, label@${firstTitleAt})`);
-    // The BORDER too — it now crosses the rail's opaque tenure bands, and a
-    // line painted under them would break at every boundary a tenure spans.
-    ok(markup.indexOf('data-era-frame=') > lastRibbonAt,
-      `${band}: the frame border paints after the ribbons it crosses`);
+
+    // ---- THE BORDER'S GEOMETRY ----
+    // Drawn at every rung now, so measured at every rung: it encloses the
+    // seasons AND the personnel rail's tenure bands, and stops clear of them.
+    {
+      // ---- the frame's vertical extent ----
+      // A chapter encloses its whole seasons AND the personnel rail's tenure
+      // bands — the people who served in an era are inside its frame — but stops
+      // at the bottom of the last band. Below that is the peek and the exit
+      // pills: a career leaving, which belongs to the person, not to the chapter
+      // they're walking out of.
+      const frameRects = [...markup.matchAll(
+        /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" data-era-frame="/g,
+      )].map((m) => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }));
+      ok(frameRects.length === eras.length,
+        `${band}: one bordered frame per era (${frameRects.length})`);
+      const frameTop = Math.min(...frameRects.map((f) => f.y));
+      const frameBottom = Math.max(...frameRects.map((f) => f.y + f.h));
+      const railZoneM = /<rect x="0" y="([\d.]+)" width="[\d.]+" height="([\d.]+)" fill="#eceef3"/
+        .exec(markup);
+      const railTopY = +railZoneM[1];
+      const railZoneBottom = railTopY + +railZoneM[2];
+      // The zone runs PEEK + 4 past the last band, so that's where the bands end.
+      const lastBandBottom = railZoneBottom - PEEK - 4;
+      ok(frameBottom > railTopY,
+        `${band}: frame reaches down INTO the personnel rail (${frameBottom.toFixed(1)} vs ${railTopY})`);
+      // frameBottom is the stroke's CENTRELINE; what has to clear the bands is
+      // its near edge, and what has to stay inside the rail zone is its far one.
+      const borderNear = frameBottom - ERA_BORDER_W / 2;
+      const borderFar = frameBottom + ERA_BORDER_W / 2;
+      ok(borderNear - lastBandBottom >= ERA_RAIL_GAP - 0.01,
+        `${band}: ${(borderNear - lastBandBottom).toFixed(2)}px clear below the last band (want >= ${ERA_RAIL_GAP})`);
+      ok(borderNear - lastBandBottom < ERA_RAIL_GAP + 2,
+        `${band}: …and not a yawning gap (${(borderNear - lastBandBottom).toFixed(2)}px)`);
+      ok(borderFar <= railZoneBottom + 0.01,
+        `${band}: …and stops above the exit peek (${borderFar.toFixed(1)} vs ${railZoneBottom.toFixed(1)})`);
+      // Ribbons ARRIVE from outside the frame: every ribbon path starts at
+      // "M x topY", and the topmost of those is above the frame's top edge.
+      const ribbonTops = [...markup.matchAll(/ d="M ([\d.-]+) ([\d.-]+)/g)].map((m) => +m[2]);
+      ok(ribbonTops.length > 0, `${band}: ribbons rendered`);
+      ok(Math.min(...ribbonTops) < frameTop,
+        `${band}: incoming ribbons enter from above the frame (${Math.min(...ribbonTops).toFixed(1)} vs ${frameTop.toFixed(1)})`);
+      // PAINT ORDER: because those connectors drop straight through the plaque
+      // band, the label has to be painted AFTER the last ribbon path — and
+      // haloed — or an opaque connector strikes a title clean through. Same
+      // requirement the year axis has.
+      // The BORDER too — it now crosses the rail's opaque tenure bands, and a
+      // line painted under them would break at every boundary a tenure spans.
+      ok(markup.indexOf('data-era-frame=') > lastRibbonAt,
+        `${band}: the frame border paints after the ribbons it crosses`);
+    }
     ok(/data-era-title="[^"]+" font-size="[\d.]+" font-weight="\d+" text-anchor="start" fill="[^"]+" stroke="#ffffff"/
       .test(markup), `${band}: era titles carry a white halo`);
     // The tint and the plaque's band still paint BEFORE everything.

@@ -50,6 +50,20 @@ export function positionGroup(position) {
   return POSITION_GROUPS[String(position || "").toUpperCase()] || "unknown";
 }
 
+// The CHIP GROUP a selectable track belongs to, for either kind of row.
+//
+// Coaches, GMs and owners are now selected exactly the way players are — one
+// row per stint, toggled individually, filtered by a chip. So the panel needs a
+// single question it can ask any row, and the answer differs by kind: a player
+// is grouped by the position they played, a staffer by the job they held. The
+// role ids ("coach", "gm", "owner") deliberately share a namespace with the
+// position groups ("qb", "ol", …) because roleColor() already colours both.
+export function trackGroup(row) {
+  if (!row) return "unknown";
+  if (row.kind === "staff") return row.role || "unknown";
+  return positionGroup(row.position);
+}
+
 export const STRIP_H = 16; // band thickness (horizontal AND vertical)
 export const STRIP_GAP = 0; // stacked bands sit flush; borders delineate
 // Vertical-tail squish. Tails stay full STRIP_H wide through SQUISH_FULL_SLOTS

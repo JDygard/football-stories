@@ -210,6 +210,154 @@ const after = await scrollLeft(page);
 ok(after > before, `mouse drag pans the timeline (${before} -> ${after})`);
 ok((await card().count()) === 0, "a drag does not leave a trailing click that opens a card");
 
+// The timeline's scroll container, by CLASS rather than by geometry. The
+// `scrollBy` helper above sniffs for "an element wider than its box", which is
+// fine while the timeline overflows — but zooming out to Eras fits the whole
+// franchise to the viewport ON PURPOSE, and at that band nothing overflows and
+// the sniff finds nothing at all. Anything that has to survive a zoom change
+// looks the element up properly.
+const TL = ".desk-timeline-scroll";
+const timeline = () =>
+  page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    return {
+      w: el.scrollWidth,
+      left: el.scrollLeft,
+      client: el.clientWidth,
+      cursor: getComputedStyle(el).cursor,
+    };
+  }, TL);
+const setScroll = (x) =>
+  page.evaluate(
+    ([sel, v]) => {
+      const el = document.querySelector(sel);
+      if (el) el.scrollLeft = v;
+    },
+    [TL, x],
+  );
+
+ok((await timeline()) != null, "the timeline scroll container is findable by class");
+
+// ---- 4b. a DIAGONAL drag pans too ----
+// There used to be an axis lock: a drag more vertical than horizontal panned
+// nothing. That was fine while the wheel moved the timeline sideways; now that
+// drag IS the navigation, a sloppy diagonal that goes nowhere reads as a dead
+// app. Deliberately steeper than it is wide — the old lock would have rejected
+// exactly this gesture.
+//
+// Re-seat the scroll first: the previous drag left it near the END of the
+// timeline, where a clamped pan looks identical to a rejected one. (It did, the
+// first time this ran — the assertion passed on a 6px move that was really the
+// scroll limit, not the drag working.)
+await closeCard();
+await setScroll(600);
+await page.waitForTimeout(60);
+const diagBefore = (await timeline()).left;
+if (railBox) {
+  const y0 = railBox.y + 12;
+  await page.mouse.move(700, y0);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) {
+    await page.mouse.move(700 - i * 24, y0 - i * 48); // 1 across : 2 up
+    await page.waitForTimeout(16);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+}
+const diagAfter = (await timeline()).left;
+ok(diagAfter - diagBefore > 80,
+  `a mostly-VERTICAL drag should still pan by its full horizontal component`
+  + ` (~120px); got ${diagBefore} -> ${diagAfter}. The axis lock must stay gone.`);
+
+// ---- 4c. the wheel ZOOMS, and does not pan ----
+// The desktop input model is scroll-to-zoom / drag-to-pan. Zoom is observable
+// without reaching into React state: committing a different band rebuilds the
+// layout at a different total width, so scrollWidth moves. A wheel that panned
+// instead would leave scrollWidth alone and change scrollLeft.
+await closeCard();
+await setScroll(600);
+await page.waitForTimeout(60);
+const zBefore = await timeline();
+await page.mouse.move(700, (railBox?.y ?? 300) - 60);
+const wheelBy = async (dy, n) => {
+  for (let i = 0; i < n; i++) {
+    await page.mouse.wheel(0, dy);
+    await page.waitForTimeout(180);
+  }
+  await page.waitForTimeout(600); // the band commit is animated
+};
+
+await wheelBy(120, 3); // down = out
+const zOut = await timeline();
+ok(zOut.w < zBefore.w,
+  `wheel down zooms OUT — total width should shrink (${zBefore.w} -> ${zOut.w}).`
+  + ` If this is unchanged, the wheel is panning again instead of zooming.`);
+
+await wheelBy(-120, 3); // up = back in
+const zIn = await timeline();
+ok(zIn.w > zOut.w, `wheel up zooms back IN (${zOut.w} -> ${zIn.w})`);
+
+// Zooming all the way out reaches the band that fits the franchise to the
+// viewport — that is what Eras is for, and it is also why the geometry sniff
+// above can't be trusted across a zoom change.
+await wheelBy(120, 6);
+const zFull = await timeline();
+ok(zFull.w <= zFull.client + 10,
+  `zoomed fully out, the whole franchise fits the viewport`
+  + ` (${zFull.w} vs ${zFull.client})`);
+await wheelBy(-120, 6);
+
+// The page itself must never scroll or page-zoom out from under the timeline:
+// the handler is non-passive and preventDefaults every wheel event.
+ok(!(await page.evaluate(() => window.scrollY !== 0)),
+  "the wheel never scrolls the page behind the timeline");
+
+// ---- 4c-ii. the wheel zooms in EVERY deltaMode ----
+// THE BUG THIS EXISTS FOR: `wheel` deltas are not always pixels. deltaMode 0 is
+// pixels (Chrome, ~100 per notch), 1 is LINES (Firefox, 3 per notch), 2 is
+// pages. The zoom accumulator counts pixels, so before it normalized, a Firefox
+// user had to spin thirty notches to move one rung — the gesture looked
+// completely dead, while every test here passed.
+//
+// It passed because `page.mouse.wheel` can ONLY produce deltaMode 0. The only
+// way to cover the other modes is to dispatch the event ourselves.
+const notch = (mode, per) =>
+  page.evaluate(
+    ([sel, m, d]) => {
+      document.querySelector(sel).dispatchEvent(new WheelEvent("wheel", {
+        deltaY: d, deltaMode: m, clientX: 700, clientY: 300,
+        bubbles: true, cancelable: true,
+      }));
+    },
+    [TL, mode, per],
+  );
+
+for (const [label, mode, per] of [
+  ["pixels (Chrome-like)", 0, 100],
+  ["lines (Firefox-like)", 1, 3],
+  ["pages", 2, 1],
+]) {
+  await page.reload();
+  await page.waitForTimeout(700);
+  const w0 = (await timeline()).w;
+  for (let i = 0; i < 4; i++) {
+    await notch(mode, per);
+    await page.waitForTimeout(120);
+  }
+  await page.waitForTimeout(700);
+  const w1 = (await timeline()).w;
+  ok(w1 < w0,
+    `deltaMode=${mode} (${label}) must zoom out like any other wheel`
+    + ` (${w0} -> ${w1}). Unchanged means the delta is being read as pixels`
+    + ` when it is not — see wheelPixels() in useDesktopViewport.`);
+}
+
+// ---- 4d. the drag surface advertises itself ----
+ok((await timeline()).cursor === "grab",
+  `the timeline shows a grab cursor so the primary gesture is discoverable`
+  + ` (got ${(await timeline()).cursor})`);
+
 // ---- 5. the shell: team changes hold the chrome and sweep the timeline ----
 // Second harness, because these only show up across a real data load: it mounts
 // the whole DesktopApp with a deliberately slow stubbed fetch.

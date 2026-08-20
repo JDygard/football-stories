@@ -34,6 +34,8 @@ import LeagueView from '../components/LeagueView.jsx'
 import MethodologyView from '../components/MethodologyView.jsx'
 import AboutView from '../components/AboutView.jsx'
 import DesktopTeamDrawer from './DesktopTeamDrawer.jsx'
+import { eraCast, resolveEraStaff, resolveEraPlayers } from '../utils/eraCast.js';
+import { staffTrackRow } from '../hooks/useTeamTenures.js';
 import { ErrorBoundary } from '../ErrorBoundary.jsx'
 import useTeamData from '../hooks/useTeamData'
 import { FRAME_ID } from '../utils/frameRect'
@@ -102,10 +104,12 @@ function PanelHeading({ icon, label, badge = null }) {
   )
 }
 
-const DEFAULT_RIBBONS = {
-  roles: { coach: true, gm: true, owner: true, unknown: true },
-  players: [],
-};
+// Every ribbon on the timeline is an explicitly chosen track now — coaches,
+// GMs and owners included. There used to be a `roles` map switching whole
+// categories of staff on by default, and a `staffOnly` allowlist that overrode
+// it while a chapter or a career was in focus. Two mechanisms governing the
+// same ribbons is what let a role toggle hide a chapter's own coach. One list.
+const DEFAULT_RIBBONS = { players: [] };
 
 function DesktopApp() {
   const [selectedTeam, setSelectedTeam] = useState("ARI");
@@ -154,6 +158,9 @@ function DesktopApp() {
   erasRef.current = erasSegment;
   const selectedTeamRef = useRef(selectedTeam);
   selectedTeamRef.current = selectedTeam;
+  // The franchise's staff rows, for resolving a chapter's staff cast.
+  const staffRef = useRef(null);
+  staffRef.current = mapped?.staff || null;
 
   const mainRef = useRef(null);
   // The header row + team drawer together; the drawer dismisses on a
@@ -187,6 +194,17 @@ function DesktopApp() {
     setLeagueOpen(false);
     setFocusYear(year ?? null);
     setPendingFollow(follow && follow.id ? follow : null);
+    // A CAREER FOCUS is one person's path, so the rail shows one track: the
+    // person you followed, and nobody else. A player's stint is resolved from
+    // the destination team's tenure segment once it mounts (below); a staffer
+    // is resolved from that team's own staff rows in the same place. Either
+    // way the selection is REPLACED, which is what clears every other coach,
+    // GM and owner — the thing that used to need a separate allowlist.
+    //
+    // A plain jump (league view, search box) carries no `follow` and touches
+    // the selection only when the team changes.
+    const following = !!(follow && follow.id);
+    if (following) setFocusedEraId(null);
     // Only a career-follow sweeps: it has a direction to express (this person
     // went from here to there). Picking a team from the header, the search box
     // or the league view is a jump, not a journey — it swaps in place.
@@ -197,16 +215,8 @@ function DesktopApp() {
         setFrozen(liveRef.current);
       }
       if (prev !== team) {
-        setRibbonConfig((c) => ({
-          ...c,
-          players: [],
-          roles:
-            follow && follow.kind === "staff" && follow.role
-              ? { ...c.roles, [follow.role]: true }
-              : c.roles,
-        }));
-      } else if (follow && follow.kind === "staff" && follow.role) {
-        setRibbonConfig((c) => ({ ...c, roles: { ...c.roles, [follow.role]: true } }));
+        setFocusedEraId(null);
+        setRibbonConfig((c) => ({ ...c, players: [] }));
       }
       return team;
     });
@@ -224,43 +234,33 @@ function DesktopApp() {
   // the one inside it.
   const focusEra = useCallback((box) => {
     setFocusedEraId(box?.id ?? null);
-    const era = (erasRef.current?.eras || []).find((e) => e.id === box?.id);
-    const wanted = (era?.highlights || []).filter((h) => h.kind !== "staff");
+    if (!box) {
+      // Nothing to restore: the reader's role toggles were overridden, never
+      // altered, so clearing the override hands the rail straight back.
+      return;
+    }
+    const era = (erasRef.current?.eras || []).find((e) => e.id === box.id);
+    const { players: wanted, staffNames } = eraCast(era);
+
+    // THE STAFF CAST lands immediately — those rows are already in hand. It
+    // REPLACES the selection rather than adding to it, which is what takes the
+    // rest of the coaching and front-office ribbons off the rail: a chapter
+    // shows its own cast, not three decades of everyone else's.
+    const staffPicked = resolveEraStaff(staffRef.current, staffNames, box, staffTrackRow);
+    setRibbonConfig((c) => ({ ...c, players: staffPicked }));
     if (!wanted.length) return;
 
-    const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const names = new Set(wanted.map((h) => norm(h.name)));
     const team = selectedTeamRef.current;
     fetch(`/data/segments/teams_tenures/${team}.json`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (!json || selectedTeamRef.current !== team) return;
-        const overlaps = (t) =>
-          t.from != null && t.to != null && t.from <= box.end && t.to >= box.start;
-        const picked = [];
-        for (const want of wanted) {
-          const rows = (json.tenures || []).filter(
-            (t) => norm(t.name) === norm(want.name) && t.conf !== "low",
-          );
-          const hit = rows.find(overlaps) || rows[0];
-          if (!hit) continue;
-          const id = hit.player_id_internal || hit.player_id;
-          picked.push({
-            key: `${id}:${hit.from}:${hit.to}`,
-            player_id: id,
-            name: hit.name,
-            position: hit.position,
-            from: hit.from,
-            to: hit.to,
-            source: hit.source,
-            prev_team: hit.prev_team,
-            next_team: hit.next_team,
-            entry: hit.entry,
-            exit: hit.exit,
-            conf: hit.conf,
-          });
+        const picked = resolveEraPlayers(json.tenures, wanted, box);
+        // Appended, not assigned: the staff cast is already on the rail and
+        // this fetch is the slow half of the same selection.
+        if (picked.length) {
+          setRibbonConfig((c) => ({ ...c, players: [...staffPicked, ...picked] }));
         }
-        if (picked.length) setRibbonConfig((c) => ({ ...c, players: picked }));
       })
       .catch(() => {});
   }, []);
@@ -299,7 +299,13 @@ function DesktopApp() {
     const { id, kind } = pendingFollow;
     if (kind === "staff") {
       const span = (mapped.staff || []).find((s) => s.admin_person_id === id);
-      if (span) setFocusYear(span.from);
+      if (span) {
+        setFocusYear(span.from);
+        // Select the destination's own row, found by id (exact). This IS the
+        // career focus: one track, the person you followed.
+        const row = staffTrackRow(span);
+        if (row) setRibbonConfig((c) => ({ ...c, players: [row] }));
+      }
       setPendingFollow(null);
       return;
     }
@@ -482,6 +488,7 @@ function DesktopApp() {
               <RibbonControls
                 teamId={selectedTeam}
                 draftSegment={draftSegment}
+                staff={mapped?.staff}
                 config={ribbonConfig}
                 onChange={setRibbonConfig}
                 // Switching a personnel track on sweeps the timeline to that

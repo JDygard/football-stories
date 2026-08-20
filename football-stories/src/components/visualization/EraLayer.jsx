@@ -31,10 +31,28 @@
 // buildTimelineLayout — this file only draws into it. Box math and every tuning
 // constant live in eraModel.js so they can be simulated in node (vite build
 // can't run in the sandbox).
+//
+// TAPPING A PLAQUE selects the chapter, which does two things: the wall label
+// gains its paragraph, and the shell highlights the people who made the era
+// (App fetches their tenures and turns their personnel ribbons on). Both are
+// the desktop behaviour, transposed. Two differences worth knowing:
+//
+//   The paragraph sits UNDER the title rather than in a column beside it, and
+//   the plaque row GROWS to hold it — real layout, so the seasons below slide
+//   down instead of being covered. Desktop reserves width for the same reason;
+//   a phone has the measure already and has to buy the height.
+//
+//   Tapping the selected plaque again CLEARS it. On desktop you dismiss a
+//   selection by clicking another one; on a phone the plaque you would tap to
+//   undo is often the one you can see, and a grown plaque you cannot put back
+//   is a trap.
 
 import { memo } from "react";
 import {
   ERA_HEADER_H,
+  ERA_BLURB_FS,
+  ERA_BLURB_LH,
+  ERA_BLURB_BASELINE,
   ERA_LABEL_BASELINE,
   ERA_YEARS_BASELINE,
   ERA_RULE_Y,
@@ -54,7 +72,14 @@ const LABEL_FAMILY = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
 
 const BORDER_W = ERA_BORDER_W;
 
-const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }) {
+const EraLayer = memo(function EraLayer({
+  boxes,
+  layer = "wash",
+  framed = true,
+  onFocusEra = null,
+  focusedEraId = null,
+  tapGuard = null,
+}) {
   if (!boxes?.length) return null;
 
   // ---- pass 1: interior tint + plaque band, under everything ----
@@ -88,7 +113,7 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }
                 x={b.x0}
                 y={b.y0}
                 width={b.width}
-                height={ERA_HEADER_H}
+                height={b.headerH || ERA_HEADER_H}
                 data-era-header={b.id}
                 fill={t.header}
               />
@@ -101,6 +126,8 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }
 
   // ---- pass 2: the frame and the label, over the ribbons, haloed ----
   if (layer === "plaque") {
+    // pointerEvents is set per-mark here rather than on the group: the hit
+    // target below needs them, and every painted mark must not have them.
     return (
       <g style={{ pointerEvents: "none" }}>
         {boxes.map((b) => {
@@ -108,8 +135,49 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }
           if (h <= 0) return null;
           const t = eraTone(b.tone);
           const ruleX2 = Math.min(b.textX + ERA_RULE_W, b.x1 - 6);
+          const headerH = b.headerH || ERA_HEADER_H;
+          const focused = focusedEraId != null && focusedEraId === b.id;
           return (
             <g key={`frame-${b.id}`}>
+              {/* HIT TARGET. It lives in this pass because this pass paints
+                  last — a target under the ribbons would be shadowed by every
+                  tenure band that crosses the plaque. Only the plaque row is
+                  tappable, never the frame's interior: that interior IS the
+                  timeline, and swallowing taps there would break every season
+                  card, draft box and ribbon inside the chapter. */}
+              {onFocusEra && (
+                <rect
+                  x={b.x0}
+                  y={b.y0}
+                  width={b.width}
+                  height={headerH}
+                  data-era-hit={b.id}
+                  fill="transparent"
+                  style={{ pointerEvents: "auto", cursor: "pointer" }}
+                  onClick={(e) => {
+                    // A tap that ends a scroll or a rail-reveal drag is not a
+                    // tap. Same guard the ribbons and draft boxes use.
+                    if (tapGuard && tapGuard()) return;
+                    e.stopPropagation();
+                    onFocusEra(focused ? null : b);
+                  }}
+                >
+                  <title>{focused ? "Close chapter" : `Open ${b.label || b.yearsText}`}</title>
+                </rect>
+              )}
+              {focused && (
+                <rect
+                  x={b.x0 + BORDER_W / 2}
+                  y={b.y0 + BORDER_W / 2}
+                  width={Math.max(0, b.width - BORDER_W)}
+                  height={Math.max(0, headerH - BORDER_W / 2)}
+                  data-era-focused={b.id}
+                  rx={8}
+                  fill={t.border}
+                  fillOpacity={0.13}
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {/* The frame itself, over the content it encloses — including the
                   ribbon layer's opaque bands. Unfilled: the wash pass already
                   laid the tint down underneath. Absent on unframed bands, where
@@ -188,6 +256,32 @@ const EraLayer = memo(function EraLayer({ boxes, layer = "wash", framed = true }
                   {b.labelText}
                 </text>
               )}
+
+              {/* THE BLURB — only on the selected chapter, and only ever as
+                  many lines as the layout bought room for (buildEraBoxes wraps
+                  to the same measure Main reserved against). Haloed in the
+                  plaque's own tint, like the rest of the label: entry bands for
+                  personnel arriving in the era's first year land on the rows
+                  immediately below, and connectors cross this band. */}
+              {focused &&
+                b.blurbLines?.map((line, i) => (
+                  <text
+                    key={i}
+                    x={b.textX}
+                    y={b.y0 + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
+                    data-era-blurb={b.id}
+                    fontSize={ERA_BLURB_FS}
+                    textAnchor="start"
+                    fill="#1f2430"
+                    stroke={t.header}
+                    strokeWidth={2.5}
+                    strokeLinejoin="round"
+                    paintOrder="stroke"
+                    style={{ letterSpacing: 0.1 }}
+                  >
+                    {line}
+                  </text>
+                ))}
             </g>
           );
         })}

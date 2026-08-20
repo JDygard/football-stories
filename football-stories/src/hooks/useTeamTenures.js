@@ -34,7 +34,36 @@ export const tenureKey = (t) =>
 const spanSeasons = (t) =>
   t.from == null ? 0 : (t.to == null ? t.from : t.to) - t.from + 1;
 
-export default function useTeamTenures(teamId, draftSegment) {
+// Staff rows, shaped like tenure rows so the panel can treat them identically.
+// The ORIGINAL segment row is spread in whole: the ribbon layer needs its
+// entry/exit and prev_team/next_team to draw arrival bands and career-follow
+// pills, and the selection entry is what the timeline is rebuilt from.
+export function staffTrackRow(s) {
+  const id = s?.admin_person_id;
+  if (!id || s.from == null) return null;
+  const to = s.to == null ? s.from : s.to;
+  return {
+    ...s,
+    kind: "staff",
+    player_id: id,
+    // Namespaced, because an admin id and a player id are different id spaces
+    // and a collision would make one person toggle the other.
+    key: `staff:${id}:${s.from}:${to}`,
+    to,
+    seasons: to - s.from + 1,
+  };
+}
+
+function staffRows(staff) {
+  const out = [];
+  for (const s of staff || []) {
+    const row = staffTrackRow(s);
+    if (row) out.push(row);
+  }
+  return out;
+}
+
+export default function useTeamTenures(teamId, draftSegment, staff = null) {
   const [fetched, setFetched] = useState(null);
 
   useEffect(() => {
@@ -75,7 +104,7 @@ export default function useTeamTenures(teamId, draftSegment) {
         row.seasons = spanSeasons(row);
         tenures.push(row);
       }
-      return { tenures, source: "pipeline" };
+      return { tenures: staffRows(staff).concat(tenures), source: "pipeline" };
     }
     // Approx fallback: one span per drafted player, so player_id IS unique
     // here — but key/seasons are still set so consumers need only one shape.
@@ -99,6 +128,6 @@ export default function useTeamTenures(teamId, draftSegment) {
         source: "approx",
       });
     }
-    return { tenures: out, source: "approx-derived" };
-  }, [fetched, draftSegment]);
+    return { tenures: staffRows(staff).concat(out), source: "approx-derived" };
+  }, [fetched, draftSegment, staff]);
 }

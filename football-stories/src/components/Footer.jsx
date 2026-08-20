@@ -17,6 +17,7 @@ const ACCENT = "#2d6cdf";
 export default function Footer({
   teamId,
   draftSegment,
+  staff,
   ribbonConfig,
   onRibbonConfigChange,
   onFocusYear,
@@ -72,6 +73,7 @@ export default function Footer({
           <RibbonControls
             teamId={teamId}
             draftSegment={draftSegment}
+            staff={staff}
             config={ribbonConfig}
             onChange={onRibbonConfigChange}
             onFocusYear={onFocusYear}

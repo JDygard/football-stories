@@ -2,27 +2,39 @@
 // transposed sibling of hooks/useTimelineViewport.js. Same architecture, axes
 // swapped:
 //
-// SCROLL = NATIVE, HORIZONTAL. DesktopMain renders a real overflow-x:auto
-// container (spacer width = committed band's totalWidth, SVG as a
-// position:sticky overlay pinned left) and this hook mirrors `scrollLeft`
-// (rAF-throttled). A plain (unmodified) wheel is translated into horizontal
-// scrolling — mouse wheels only emit deltaY, and "wheel moves the timeline"
-// is the expected idiom for a horizontal timeline. Trackpad horizontal pans
-// and the scrollbar hit the same native scroller. A horizontal MOUSE drag
-// also pans (desktop users expect grab-and-drag; touch horizontal pans are
-// native via touch-action:pan-x).
+// THE DESKTOP INPUT MODEL: SCROLL ZOOMS, DRAG PANS.
 //
-// ZOOM stays custom (semantic-band zoom): ctrl/⌘+wheel and two-finger pinch
-// drive `gestureW`, a desired apparent content WIDTH; `pickBand` commits the
-// nearest band and `visualScale` cosmetically bridges the rest along x,
-// anchored on the cursor's focal point (kept under the cursor across band
-// switches via scrollLeft).
+// The wheel is the zoom control — EVERY wheel event, modified or not, drives
+// semantic-band zoom on the cursor's focal point. Lateral movement is
+// grab-and-drag (plus the native scrollbar and programmatic scrollBy). This is
+// the deliberate inverse of what this hook used to do, where a plain wheel
+// scrolled sideways and zoom hid behind ctrl/⌘; on a timeline whose whole
+// story is told by how far out you're standing, zoom is the gesture worth
+// spending the primary input on, and dragging a timeline sideways is the more
+// direct way to travel along it anyway.
+//
+// This is a DESKTOP-ONLY decision. The mobile tree
+// (hooks/useTimelineViewport.js) is a separate branch with its own input model
+// and is deliberately NOT kept in sync with this one.
+//
+// SCROLL POSITION is still NATIVE and horizontal. DesktopMain renders a real
+// overflow-x:auto container (spacer width = committed band's totalWidth, SVG as
+// a position:sticky overlay pinned left) and this hook mirrors `scrollLeft`
+// (rAF-throttled). Drag moves that scroller; so do the scrollbar and one-finger
+// touch (native, via touch-action:pan-x). Nothing about scroll POSITION changed
+// — only what drives it.
+//
+// ZOOM is custom (semantic-band): the wheel and two-finger pinch drive
+// `gestureW`, a desired apparent content WIDTH; `pickBand` commits the nearest
+// band and `visualScale` cosmetically bridges the rest along x, anchored on the
+// cursor's focal point (kept under the cursor across band switches via
+// scrollLeft).
 //
 // There is NO drag-reveal on desktop: career-follow pills are always visible
 // in the margins above the lane and below the rail (the landscape viewport
 // has the room), so mobile's rail-reveal machinery has no counterpart here.
-// Pointer handling only distinguishes a horizontal mouse drag-pan from a tap
-// (didDrag guards trailing clicks).
+// Pointer handling only distinguishes a mouse drag-pan from a tap (didDrag
+// guards trailing clicks).
 
 import {
   useCallback,
@@ -41,10 +53,45 @@ import { clamp, expSmooth, pickBand, visualScaleFor } from "../hooks/zoomMath.js
 // user-facing rungs (Eras / Seasons / Season by season / Every game).
 const N = DESKTOP_BANDS.length;
 const TAP_SLOP = 5; // px of pointer travel before a press counts as a drag
-// A drag locks to an axis only when it clearly wins (AXIS_BIAS); horizontal
-// mouse drags pan the scroller, vertical drags do nothing (no reveal).
-const AXIS_BIAS = 1.4;
-const WHEEL_STEP = 90; // accumulated ctrl-wheel deltaY that advances one band
+// NO AXIS LOCK. A drag pans by its HORIZONTAL COMPONENT whichever way it
+// travels — there used to be one, and a mostly-vertical drag did nothing at
+// all. That was defensible while the wheel was the main way to move sideways;
+// now that drag IS the navigation, a sloppy diagonal that goes nowhere just
+// reads as the app being broken. Vertical movement is simply ignored (desktop
+// has no drag-reveal — see below).
+const WHEEL_STEP = 90; // accumulated wheel PIXELS that advance one band
+
+// WHEEL DELTAS ARE NOT ALL IN PIXELS, and assuming they are is how the zoom
+// gesture silently did nothing in some browsers while working in others.
+//
+// `deltaMode` says what the numbers mean: 0 = pixels, 1 = LINES, 2 = pages.
+// Chrome sends mode 0 with ~100 per notch. Firefox sends mode 1 with 3 per
+// notch — so against a 90-PIXEL threshold, a Firefox user had to spin the wheel
+// THIRTY notches to move one rung, which is indistinguishable from a wheel that
+// isn't wired up at all. Everything here has to be normalized to pixels first.
+//
+// The constants are the usual ones (cf. normalize-wheel): 40px per line puts a
+// Firefox notch at 3 x 40 = 120px, right alongside Chrome's ~100, so the gesture
+// costs the same amount of wrist in both.
+//
+// NOTE FOR TESTS: Playwright's `mouse.wheel` can only produce mode 0, so no
+// amount of driving it will exercise this. sims/desktop_interaction.drive.mjs
+// dispatches WheelEvents with an explicit deltaMode instead.
+const WHEEL_LINE_PX = 40;
+const WHEEL_PAGE_PX = 800;
+// One event may not carry the ladder more than two rungs: page-mode deltas are
+// enormous once normalized, and without this a single notch in that mode would
+// slam from one end of the zoom range to the other.
+const WHEEL_MAX_PX = 2 * WHEEL_STEP;
+
+// A wheel event's travel in PIXELS, along whichever axis dominates.
+export function wheelPixels(e) {
+  const raw = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+  const scale =
+    e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1;
+  const px = raw * scale;
+  return Math.max(-WHEEL_MAX_PX, Math.min(WHEEL_MAX_PX, px));
+}
 const ANIM_DONE_PX = 0.5;
 const ANIM_TAU = 55; // ms
 
@@ -264,32 +311,36 @@ export default function useDesktopViewport({
     if (!el) return;
     const leftOf = () => el.getBoundingClientRect().left;
 
+    // EVERY wheel event zooms, on the cursor's focal point — that is the whole
+    // point of the desktop input model (see the note at the top of this file).
+    //
+    // No ctrl/⌘ branch any more, but preventDefault still has to run on the
+    // modified case or the BROWSER page-zooms underneath us; a ctrl+wheel now
+    // simply zooms the timeline like every other wheel.
+    //
+    // The delta is normalized to PIXELS first (see wheelPixels — deltaMode is
+    // not always 0), and the dominant axis feeds the accumulator so the gesture
+    // also works on hardware that reports a sideways scroll (a tilt wheel, a
+    // horizontal swipe) instead of a vertical one.
     const onWheel = (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        // Semantic zoom on the cursor's focal point.
-        e.preventDefault();
-        const cursorX = e.clientX - leftOf();
-        if (!rafRef.current) {
-          targetBandRef.current = bandIndexRef.current;
-          wheelAccumRef.current = 0;
-        }
-        wheelAccumRef.current += e.deltaY;
-        const steps = Math.trunc(wheelAccumRef.current / WHEEL_STEP);
-        if (steps !== 0) {
-          wheelAccumRef.current -= steps * WHEEL_STEP;
-          targetBandRef.current = clamp(targetBandRef.current + steps, 0, N - 1);
-        }
-        startAnimRef.current(bandWidthsRef.current[targetBandRef.current], cursorX);
-        return;
+      e.preventDefault();
+      const d = wheelPixels(e);
+      if (d === 0) return;
+      const cursorX = e.clientX - leftOf();
+      // A fresh gesture re-bases on the COMMITTED band: without this the
+      // accumulator would keep counting from wherever the last one left off
+      // and a single notch could jump two rungs.
+      if (!rafRef.current) {
+        targetBandRef.current = bandIndexRef.current;
+        wheelAccumRef.current = 0;
       }
-      // Plain wheel -> horizontal scroll. Mouse wheels emit deltaY only; route
-      // the dominant axis into scrollLeft so both wheels and trackpad
-      // horizontal pans move the timeline (and the page never scrolls/swipes).
-      const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-      if (d !== 0) {
-        e.preventDefault();
-        el.scrollLeft += d;
+      wheelAccumRef.current += d;
+      const steps = Math.trunc(wheelAccumRef.current / WHEEL_STEP);
+      if (steps !== 0) {
+        wheelAccumRef.current -= steps * WHEEL_STEP;
+        targetBandRef.current = clamp(targetBandRef.current + steps, 0, N - 1);
       }
+      startAnimRef.current(bandWidthsRef.current[targetBandRef.current], cursorX);
     };
 
     // Two-finger pinch zoom via TOUCH events (touch-capable desktops); mirrors
@@ -349,14 +400,15 @@ export default function useDesktopViewport({
     [],
   );
 
-  // ---- pointer handling: horizontal MOUSE drag-pan + tap-vs-drag tracking.
-  //      Horizontal touch pans are native (touch-action:pan-x); pinch is owned
-  //      by the touch listeners above (and bails this handler). ----
+  // ---- pointer handling: MOUSE drag-pan + tap-vs-drag tracking.
+  //      Drag is the primary lateral navigation on desktop. Horizontal touch
+  //      pans are native (touch-action:pan-x); pinch is owned by the touch
+  //      listeners above (and bails this handler). ----
   const dragXRef = useRef(null);
   const dragYRef = useRef(null);
   const pressXRef = useRef(null);
   const pressYRef = useRef(null);
-  const axisRef = useRef(null); // null | "h" | "v"
+  const draggingRef = useRef(false);
   const movedRef = useRef(false);
   // Pointer id we captured for an in-flight drag, or null. Only set once a
   // press has been promoted to a drag — see onPointerDown for why.
@@ -382,7 +434,7 @@ export default function useDesktopViewport({
     pressYRef.current = e.clientY;
     dragXRef.current = e.clientX;
     dragYRef.current = e.clientY;
-    axisRef.current = null;
+    draggingRef.current = false;
     movedRef.current = false;
   }, []);
 
@@ -390,33 +442,35 @@ export default function useDesktopViewport({
     (e) => {
       if (pinchActiveRef.current) return; // a pinch owns the gesture
       if (pressXRef.current == null) return;
-      if (axisRef.current == null) {
+      if (!draggingRef.current) {
+        // Promote press -> drag once it clears the slop, in ANY direction.
         const tdx = e.clientX - pressXRef.current;
         const tdy = e.clientY - pressYRef.current;
-        if (Math.max(Math.abs(tdx), Math.abs(tdy)) > TAP_SLOP) {
-          axisRef.current = Math.abs(tdy) > Math.abs(tdx) * AXIS_BIAS ? "v" : "h";
-          movedRef.current = true;
-          // The gesture is now a drag, so take the pointer: the pan keeps
-          // tracking if the cursor leaves the container mid-drag. Mouse only —
-          // capturing a TOUCH pointer would steal it from the native scroller.
-          if (e.pointerType === "mouse" && capturedIdRef.current == null) {
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-            capturedIdRef.current = e.pointerId;
-          }
-        } else {
+        if (Math.max(Math.abs(tdx), Math.abs(tdy)) <= TAP_SLOP) {
           dragXRef.current = e.clientX;
           dragYRef.current = e.clientY;
           return;
         }
+        draggingRef.current = true;
+        movedRef.current = true;
+        // The gesture is now a drag, so take the pointer: the pan keeps
+        // tracking if the cursor leaves the container mid-drag. Mouse only —
+        // capturing a TOUCH pointer would steal it from the native scroller.
+        if (e.pointerType === "mouse" && capturedIdRef.current == null) {
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          capturedIdRef.current = e.pointerId;
+        }
       }
-      if (axisRef.current === "h" && e.pointerType === "mouse") {
+      if (e.pointerType === "mouse") {
         // Grab-and-drag panning for the mouse; touch horizontal is native.
+        // Only the HORIZONTAL component is used — the timeline has one axis —
+        // but the drag is never rejected for being too vertical.
         const dx = e.clientX - dragXRef.current;
         dragXRef.current = e.clientX;
+        dragYRef.current = e.clientY;
         const el = scrollRef.current;
-        if (el) el.scrollLeft -= dx; // scroll event mirrors into state
+        if (el && dx !== 0) el.scrollLeft -= dx; // scroll event mirrors into state
       }
-      // axis === "v": nothing to do — no drag reveal on desktop.
     },
     [],
   );
@@ -431,7 +485,7 @@ export default function useDesktopViewport({
       }
       capturedIdRef.current = null;
     }
-    axisRef.current = null;
+    draggingRef.current = false;
     pressXRef.current = null;
     pressYRef.current = null;
   }, []);

@@ -21,6 +21,48 @@
 // the chart it introduces.
 export const ERA_HEADER_H = 132;
 
+// THE COMPACT PLAQUE, and why there has to be one.
+//
+// The desktop assembly is a HEIGHT BUDGET, not a scroll: lane, rail, pills and
+// axis all come out of the window. ERA_HEADER_H is 132 of that, and once Named
+// Eras appeared at every rung the game zooms started paying it too — which is
+// exactly where the lane needs its height most, because that is where a full
+// game log lives. On a 600px-tall window that left the lane at its floor and
+// the year row and draft columns sliced off by the control dock: the era had
+// eaten the timeline.
+//
+// So the plaque has two sizes. It takes the full 132 when the window can spare
+// it and this compact one when it cannot — years and title on two tight lines,
+// no accent rule, no record, no blurb. Those extras are for the coarse rungs
+// where you are READING a chapter; at Every Game you only need to know which
+// chapter you are in, and 40px says that.
+//
+// The rule is that the LANE IS PAID FIRST (see eraZoneFor). A chapter heading
+// must never be the reason you cannot see the football.
+export const ERA_HEADER_COMPACT_H = 40;
+export const ERA_COMPACT_YEARS_BASELINE = 14;
+export const ERA_COMPACT_LABEL_BASELINE = 33;
+
+/**
+ * How much height the era plaque may take, given everything else in the
+ * assembly and the floor the lane refuses to go below.
+ *
+ * Returns 0 when there is not even room for the compact plaque — at which
+ * point the frame and wash still draw, so a chapter is still visibly a
+ * container; it just goes unlabelled rather than swallowing the timeline.
+ */
+export function eraZoneFor({ show, height, otherFixed, laneMin }) {
+  if (!show) return 0;
+  // The FULL label is a luxury: it only gets its 132 when the window can pay
+  // for it on top of the lane's floor. The COMPACT one is not negotiable —
+  // 40px is small enough to always afford, and a chapter you cannot see is the
+  // thing this was all supposed to fix. The lane's own Math.max floor already
+  // stops it being squeezed below LANE_MIN; what it cannot survive is 132.
+  return height - 16 - otherFixed - laneMin >= ERA_HEADER_H
+    ? ERA_HEADER_H
+    : ERA_HEADER_COMPACT_H;
+}
+
 // THE standardized left gutter. Every line of era text starts here — the years
 // eyebrow, the rule, the title — measured from the frame's own left border, so
 // a run of eras down the timeline shares one crisp vertical edge no matter how

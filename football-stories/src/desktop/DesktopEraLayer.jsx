@@ -35,6 +35,9 @@ import {
   ERA_BLURB_LH,
   ERA_BLURB_BASELINE,
   ERA_HEADER_H,
+  ERA_HEADER_COMPACT_H,
+  ERA_COMPACT_YEARS_BASELINE,
+  ERA_COMPACT_LABEL_BASELINE,
   ERA_LABEL_BASELINE,
   ERA_RECORD_FS,
   ERA_YEARS_BASELINE,
@@ -84,11 +87,28 @@ const ERA_INK = "#111111";
 // the frame keeps below the rail is measured to this stroke's near edge.
 const BORDER_W = ERA_BORDER_W;
 
+// Air kept between a sliding label and the far end of its own chapter.
+const LABEL_SLIDE_PAD = 8;
+
 const DesktopEraLayer = memo(function DesktopEraLayer({
   boxes,
   top,
   bottom,
   layer = "frame",
+  // false on the two GAME bands, where an era is several windows wide and its
+  // border would only ever be one vertical line with nothing to relate it to.
+  // The plaque still draws: the chapter is still named, it just has no box.
+  framed = true,
+  // Short window: the plaque is two tight lines (years, title) instead of the
+  // full wall label. No rule, no record, no blurb — see ERA_HEADER_COMPACT_H.
+  //
+  // This MUST agree with the height the assembly reserved (eraZoneFor). It
+  // arrives as a flag rather than being re-derived here because the two
+  // deciding it separately is how the band ended up 132 tall inside a 40px
+  // zone, printing a chapter title straight through the year row.
+  compact = false,
+  // Horizontal scroll offset — the sticky wall label reads it, see below.
+  scrollX = 0,
   onFocusEra = null,
   focusedEraId = null,
   tapGuard = null,
@@ -96,6 +116,8 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
   if (!boxes?.length) return null;
   const height = Math.max(0, bottom - top);
   if (height <= 0) return null;
+  // The plaque's own height, which is what the assembly actually reserved.
+  const bandH = compact ? ERA_HEADER_COMPACT_H : ERA_HEADER_H;
 
   // ---- pass 1: interior tint + plaque band, under everything ----
   if (layer === "wash") {
@@ -124,15 +146,15 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                 x={b.x0}
                 y={top}
                 width={b.width}
-                height={ERA_HEADER_H}
+                height={bandH}
                 data-era-header={b.id}
                 fill={t.header}
               />
               <line
                 x1={b.x0}
                 x2={b.x1}
-                y1={top + ERA_HEADER_H - 0.5}
-                y2={top + ERA_HEADER_H - 0.5}
+                y1={top + bandH - 0.5}
+                y2={top + bandH - 0.5}
                 stroke={t.border}
                 strokeWidth={1}
                 strokeOpacity={0.5}
@@ -151,6 +173,29 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
         {boxes.map((b) => {
           const t = tone(b.tone % ERA_TONE_COUNT);
           const focused = focusedEraId === b.id;
+          // STICKY WALL LABEL.
+          //
+          // At the game zooms a chapter is several windows wide. A label pinned
+          // to its own left edge is therefore on screen for a few percent of the
+          // time you spend inside that chapter, which makes the plaque a thing
+          // you glimpse once and then scroll past — not much use if the point is
+          // knowing which chapter you are in. So it slides with the viewport,
+          // bounded by the chapter's own two ends: it starts moving when its
+          // left edge would go off screen and stops before it can cross into
+          // the next chapter. (DesktopRibbonLayer clamps its band labels the
+          // same way; this one also clamps at the far end, which that one does
+          // not.)
+          //
+          // Driven by SCROLL, not by band. While a chapter's left edge is on
+          // screen the label sits exactly on its frame's gutter — which is what
+          // makes a run of chapters share one vertical edge, and is always the
+          // case at the Eras rung, where the whole franchise fits and nothing
+          // scrolls. It only starts moving once that edge has gone past you.
+          const labelBlockW = b.blurbLines?.length
+            ? b.blurbX + b.blurbW - b.x0
+            : b.textX - b.x0 + b.titleZoneW;
+          const slideMax = Math.max(b.x0, b.x1 - labelBlockW - LABEL_SLIDE_PAD);
+          const dx = Math.min(Math.max(b.x0, scrollX), slideMax) - b.x0;
           return (
             <g key={b.id}>
               {/* HIT TARGET for focusing the chapter. It lives in this pass
@@ -164,17 +209,23 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   x={b.x0}
                   y={top}
                   width={b.width}
-                  height={ERA_HEADER_H}
+                  height={bandH}
                   data-era-hit={b.id}
                   fill="transparent"
                   style={{ pointerEvents: "auto", cursor: "pointer" }}
                   onClick={(e) => {
                     if (tapGuard && tapGuard()) return;
                     e.stopPropagation();
-                    onFocusEra(b);
+                    // Toggle, not set. Opening a chapter now also narrows the
+                    // personnel rail to that chapter's cast, so there has to be
+                    // a direct way to put the rail back — clicking the open
+                    // plaque again. (Mobile has done this since it shipped.)
+                    onFocusEra(focusedEraId === b.id ? null : b);
                   }}
                 >
-                  <title>{`Focus ${b.label || b.yearsText}`}</title>
+                  <title>
+                    {focused ? "Close chapter" : `Open ${b.label || b.yearsText}`}
+                  </title>
                 </rect>
               )}
               {focused && (
@@ -182,7 +233,7 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                   x={b.x0 + BORDER_W / 2}
                   y={top + BORDER_W / 2}
                   width={Math.max(0, b.width - BORDER_W)}
-                  height={Math.max(0, ERA_HEADER_H - BORDER_W / 2)}
+                  height={Math.max(0, bandH - BORDER_W / 2)}
                   data-era-focused={b.id}
                   rx={6}
                   fill={t.border}
@@ -192,121 +243,173 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
               )}
               {/* The frame itself, over the content it encloses — including
                   the rail's opaque tenure bands at the bottom. Unfilled: the
-                  wash pass already laid the tint down underneath. */}
-              <rect
-                x={b.x0 + BORDER_W / 2}
-                y={top + BORDER_W / 2}
-                width={Math.max(0, b.width - BORDER_W)}
-                height={Math.max(0, height - BORDER_W)}
-                data-era-frame={b.id}
-                rx={6}
-                fill="none"
-                stroke={t.border}
-                strokeWidth={BORDER_W}
-              />
-              {b.showYears && (
-                <text
-                  x={b.yearsX}
-                  y={top + ERA_YEARS_BASELINE}
-                  data-era-years={b.id}
-                  fontSize={ERA_YEARS_FS}
-                  fontWeight={600}
-                  textAnchor="start"
-                  fill={ERA_INK}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
-                  style={{ letterSpacing: ERA_YEARS_TRACKING }}
-                >
-                  {b.yearsText}
-                </text>
+                  wash pass already laid the tint down underneath. Absent on the
+                  game bands, where the plaque stands on its own. */}
+              {framed && (
+                <rect
+                  x={b.x0 + BORDER_W / 2}
+                  y={top + BORDER_W / 2}
+                  width={Math.max(0, b.width - BORDER_W)}
+                  height={Math.max(0, height - BORDER_W)}
+                  data-era-frame={b.id}
+                  rx={6}
+                  fill="none"
+                  stroke={t.border}
+                  strokeWidth={BORDER_W}
+                />
               )}
-              {/* The rule belongs to the LABEL, not to the frame: a chapter too
-                  narrow for any words shouldn't carry an orphan tick. White
-                  underlay first, so it survives a connector crossing it. */}
-              {(b.showYears || b.labelText) && (
-                <g>
-                  <line
-                    x1={b.textX}
-                    x2={Math.min(b.textX + ERA_RULE_W, b.x1 - 6)}
-                    y1={top + ERA_RULE_Y + 0.5}
-                    y2={top + ERA_RULE_Y + 0.5}
-                    stroke="#ffffff"
-                    strokeWidth={4}
-                  />
-                  <line
-                    x1={b.textX}
-                    x2={Math.min(b.textX + ERA_RULE_W, b.x1 - 6)}
-                    y1={top + ERA_RULE_Y + 0.5}
-                    y2={top + ERA_RULE_Y + 0.5}
-                    data-era-rule={b.id}
-                    stroke={t.border}
-                    strokeWidth={1.25}
-                    strokeOpacity={0.75}
-                  />
-                </g>
-              )}
-              {b.showRecord && (
-                <text
-                  x={b.recordX}
-                  y={top + b.recordBaseline}
-                  data-era-record={b.id}
-                  fontSize={ERA_RECORD_FS}
-                  fontWeight={600}
-                  textAnchor="start"
-                  fill={ERA_INK}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
-                  style={{ letterSpacing: 0.6 }}
-                >
-                  {b.recordText}
-                </text>
-              )}
-              {b.labelText && (
-                <text
-                  x={b.labelX}
-                  y={top + ERA_LABEL_BASELINE}
-                  data-era-title={b.id}
-                  fontSize={ERA_LABEL_FS}
-                  fontWeight={600}
-                  textAnchor="start"
-                  fill={ERA_INK}
-                  stroke="#ffffff"
-                  strokeWidth={4.5}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
-                  style={{ fontFamily: LABEL_FAMILY, letterSpacing: 0.2 }}
-                >
-                  {b.labelText}
-                </text>
-              )}
+              <g transform={dx ? `translate(${dx} 0)` : undefined}>
+                {compact ? (
+                  <>
+                    {/* Two lines and nothing else. The accent rule, the
+                        record and the blurb are for the coarse rungs,
+                        where you are reading a chapter rather than
+                        tracking games inside one. */}
+                    {b.showYears && (
+                      <text
+                        x={b.yearsX}
+                        y={top + ERA_COMPACT_YEARS_BASELINE}
+                        data-era-years={b.id}
+                        fontSize={ERA_YEARS_FS}
+                        fontWeight={600}
+                        textAnchor="start"
+                        fill={ERA_INK}
+                        stroke="#ffffff"
+                        strokeWidth={3}
+                        strokeLinejoin="round"
+                        paintOrder="stroke"
+                        style={{ letterSpacing: ERA_YEARS_TRACKING }}
+                      >
+                        {b.yearsText}
+                      </text>
+                    )}
+                    {b.labelText && (
+                      <text
+                        x={b.labelX}
+                        y={top + ERA_COMPACT_LABEL_BASELINE}
+                        data-era-title={b.id}
+                        fontSize={ERA_LABEL_FS}
+                        fontWeight={600}
+                        textAnchor="start"
+                        fill={ERA_INK}
+                        stroke="#ffffff"
+                        strokeWidth={4.5}
+                        strokeLinejoin="round"
+                        paintOrder="stroke"
+                        style={{ fontFamily: LABEL_FAMILY, letterSpacing: 0.2 }}
+                      >
+                        {b.labelText}
+                      </text>
+                    )}
+                  </>
+                ) : (
+                  <>
+                  {b.showYears && (
+                    <text
+                      x={b.yearsX}
+                      y={top + ERA_YEARS_BASELINE}
+                      data-era-years={b.id}
+                      fontSize={ERA_YEARS_FS}
+                      fontWeight={600}
+                      textAnchor="start"
+                      fill={ERA_INK}
+                      stroke="#ffffff"
+                      strokeWidth={3}
+                      strokeLinejoin="round"
+                      paintOrder="stroke"
+                      style={{ letterSpacing: ERA_YEARS_TRACKING }}
+                    >
+                      {b.yearsText}
+                    </text>
+                  )}
+                  {/* The rule belongs to the LABEL, not to the frame: a chapter too
+                      narrow for any words shouldn't carry an orphan tick. White
+                      underlay first, so it survives a connector crossing it. */}
+                  {(b.showYears || b.labelText) && (
+                    <g>
+                      <line
+                        x1={b.textX}
+                        x2={Math.min(b.textX + ERA_RULE_W, b.x1 - 6)}
+                        y1={top + ERA_RULE_Y + 0.5}
+                        y2={top + ERA_RULE_Y + 0.5}
+                        stroke="#ffffff"
+                        strokeWidth={4}
+                      />
+                      <line
+                        x1={b.textX}
+                        x2={Math.min(b.textX + ERA_RULE_W, b.x1 - 6)}
+                        y1={top + ERA_RULE_Y + 0.5}
+                        y2={top + ERA_RULE_Y + 0.5}
+                        data-era-rule={b.id}
+                        stroke={t.border}
+                        strokeWidth={1.25}
+                        strokeOpacity={0.75}
+                      />
+                    </g>
+                  )}
+                  {b.showRecord && (
+                    <text
+                      x={b.recordX}
+                      y={top + b.recordBaseline}
+                      data-era-record={b.id}
+                      fontSize={ERA_RECORD_FS}
+                      fontWeight={600}
+                      textAnchor="start"
+                      fill={ERA_INK}
+                      stroke="#ffffff"
+                      strokeWidth={3}
+                      strokeLinejoin="round"
+                      paintOrder="stroke"
+                      style={{ letterSpacing: 0.6 }}
+                    >
+                      {b.recordText}
+                    </text>
+                  )}
+                  {b.labelText && (
+                    <text
+                      x={b.labelX}
+                      y={top + ERA_LABEL_BASELINE}
+                      data-era-title={b.id}
+                      fontSize={ERA_LABEL_FS}
+                      fontWeight={600}
+                      textAnchor="start"
+                      fill={ERA_INK}
+                      stroke="#ffffff"
+                      strokeWidth={4.5}
+                      strokeLinejoin="round"
+                      paintOrder="stroke"
+                      style={{ fontFamily: LABEL_FAMILY, letterSpacing: 0.2 }}
+                    >
+                      {b.labelText}
+                    </text>
+                  )}
 
-              {/* THE BLURB — only on the selected chapter. The wall label
-                  gains its paragraph when you pick it; every frame carrying
-                  prose at all times would turn the timeline into a page of
-                  text. Haloed like the rest of the plaque text because ribbon
-                  connectors drop through this band. */}
-              {focused &&
-                b.blurbLines?.map((line, i) => (
-                  <text
-                    key={i}
-                    x={b.blurbX}
-                    y={top + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
-                    data-era-blurb={b.id}
-                    fontSize={ERA_BLURB_FS}
-                    textAnchor="start"
-                    fill={ERA_INK}
-                    stroke={t.header}
-                    strokeWidth={2.5}
-                    paintOrder="stroke"
-                    style={{ letterSpacing: 0.1 }}
-                  >
-                    {line}
-                  </text>
-                ))}
+                  {/* THE BLURB — only on the selected chapter. The wall label
+                      gains its paragraph when you pick it; every frame carrying
+                      prose at all times would turn the timeline into a page of
+                      text. Haloed like the rest of the plaque text because ribbon
+                      connectors drop through this band. */}
+                  {focused &&
+                    b.blurbLines?.map((line, i) => (
+                      <text
+                        key={i}
+                        x={b.blurbX}
+                        y={top + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
+                        data-era-blurb={b.id}
+                        fontSize={ERA_BLURB_FS}
+                        textAnchor="start"
+                        fill={ERA_INK}
+                        stroke={t.header}
+                        strokeWidth={2.5}
+                        paintOrder="stroke"
+                        style={{ letterSpacing: 0.1 }}
+                      >
+                        {line}
+                      </text>
+                    ))}
+                  </>
+                )}
+              </g>
             </g>
           );
         })}

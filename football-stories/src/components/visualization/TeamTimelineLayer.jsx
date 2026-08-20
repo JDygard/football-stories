@@ -441,9 +441,16 @@ const OffseasonBlock = memo(function OffseasonBlock({
   if ((!block.modules || !block.modules.length) && !showBanner) return null;
 
   const headerH = block.headerHeight || 0;
-  // Header (year marker) sits at the very top of the block, ABOVE the ribbon
-  // reserve (which now begins at block.ribbonTop).
-  const headTop = block.y0;
+  // Header (year marker) sits at the top of the block's CONTENT, above the
+  // ribbon reserve (which begins at block.ribbonTop).
+  //
+  // headerY, not y0. A Named Era opening on this year buys a plaque row off the
+  // top of the block, and everything inside the block measures from below it —
+  // that is the whole reason contentY/headerY exist. This read y0 because it
+  // predates Named Eras and the bands that had them never reached this branch;
+  // when eras came to every zoom the year headline landed inside the chapter's
+  // wall label, printing "1973" through "1973–1977".
+  const headTop = block.headerY ?? block.contentY ?? block.y0;
   const headBot = headTop + headerH;
   const headMid = headTop + headerH / 2; // shared centerline for year + winrate
   const big = offMode === "full";
@@ -601,6 +608,10 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
   onFollow,
   showWinRate = true,
   showPlayoffs = true,
+  // Named Era selection: the id of the open chapter, and the tap handler that
+  // opens or closes one. Both null-safe — the era feature can be off.
+  onFocusEra = null,
+  focusedEraId = null,
 }) {
   const ribbonLayout = useMemo(
     () => buildStaffRibbons({ staff, layout }),
@@ -738,8 +749,9 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         railRight: railWidth ? railLeft + railWidth : null,
         // No frame to hang the gutter off — line the plaque up with the page.
         textLeft: eraFramed ? null : contentLeft,
+        selectedId: focusedEraId,
       }),
-    [layout, width, railWidth, railLeft, eraFramed, contentLeft],
+    [layout, width, railWidth, railLeft, eraFramed, contentLeft, focusedEraId],
   );
   const visibleEras = useMemo(
     () => eraBoxes.filter((b) => b.y1 > scrollY - vPad && b.y0 < vBot),
@@ -1009,7 +1021,14 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
 
       {/* NAMED ERAS, pass 2 — the label (and, on framed bands, the border) over
           the ribbons and everything else, each mark haloed in white. */}
-      <EraLayer boxes={visibleEras} layer="plaque" framed={eraFramed} />
+      <EraLayer
+        boxes={visibleEras}
+        layer="plaque"
+        framed={eraFramed}
+        onFocusEra={onFocusEra}
+        focusedEraId={focusedEraId}
+        tapGuard={tapGuard}
+      />
     </g>
 
     </>

@@ -16,6 +16,11 @@ import {
 } from "../src/desktop/desktopDraftModel.js";
 import { pickBand } from "../src/hooks/zoomMath.js";
 import {
+  eraZoneFor,
+  ERA_HEADER_H,
+  ERA_HEADER_COMPACT_H,
+} from "../src/desktop/desktopEraModel.js";
+import {
   buildEraBoxes, eraYearsLabel, eraRecordLabel, estimateTextWidth,
   ERA_LABEL_FS, ERA_YEARS_FS, ERA_TEXT_INSET, ERA_LABEL_BASELINE,
 } from "../src/desktop/desktopEraModel.js";

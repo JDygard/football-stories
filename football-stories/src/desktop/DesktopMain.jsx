@@ -135,14 +135,16 @@ const DesktopMain = forwardRef(function DesktopMain(
     [draftSegment, expandedDraftYears, onToggleDraftYear, onSelectPick, tapGuard, adjustedGrades],
   );
 
-  // ---- ribbon spans: staff (role-filtered) + selected player tenures ----
+  // ---- ribbon spans: every selected track, staff and players alike ----
   const spans = useMemo(() => {
     const out = [];
-    for (const s of mapped?.staff || []) {
-      if (ribbonConfig.roles?.[s.role] === false) continue;
-      out.push(s);
-    }
     for (const p of ribbonConfig.players || []) {
+      // Staff rows carry their segment row whole (entry/exit, prev/next team),
+      // so the ribbon layer needs nothing added but the id it keys on.
+      if (p.kind === "staff") {
+        out.push({ ...p, admin_person_id: p.player_id });
+        continue;
+      }
       out.push({
         admin_person_id: p.player_id,
         name: p.name,

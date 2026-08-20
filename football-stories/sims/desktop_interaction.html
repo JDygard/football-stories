@@ -1,5 +1,13 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><style>
+<html><head><meta charset="utf-8">
+<!-- The real desktop stylesheet. The harness mounts DesktopMain DIRECTLY, but
+     desktop.css is imported by DesktopApp (one level up), so without this link
+     the harness runs unstyled and anything asserted about CSS silently reads
+     its initial value — which is exactly how the grab-cursor assertion first
+     came back "auto". Linking the real file keeps the sim honest about what
+     ships. -->
+<link rel="stylesheet" href="../src/desktop/desktop.css">
+<style>
   html,body,#root{margin:0;height:100%;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 </style></head>
 <body><div id="root"></div><script src="./.harness.js"></script></body></html>

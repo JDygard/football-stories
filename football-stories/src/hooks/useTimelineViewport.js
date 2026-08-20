@@ -70,6 +70,10 @@ export default function useTimelineViewport({
   // Curated Named Era rows, or null when the franchise has none authored / the
   // toggle is off. Only the two coarsest bands' layouts do anything with them.
   eras = null,
+  // { [eraId]: px } — see buildTimelineLayout. Changing it rebuilds every
+  // band's layout, which is why it is a stable memo in Main and not an inline
+  // object literal.
+  eraHeaderExtra = null,
 }) {
   const [bandIndex, setBandIndex] = useState(initialBandIndex);
   // scrollY mirrors the scroll container's scrollTop (set from scroll events).
@@ -100,9 +104,10 @@ export default function useTimelineViewport({
           top: 0,
           showPlayoffs,
           eras,
+          eraHeaderExtra,
         }),
       ),
-    [seasons, modules, moduleData, reserveByYear, showPlayoffs, eras],
+    [seasons, modules, moduleData, reserveByYear, showPlayoffs, eras, eraHeaderExtra],
   );
   // Gesture-space heights: a SEPARATED-OUT copy of the band heights, each one
   // forced to at least MIN_BAND_RATIO times the next-less-detailed band.

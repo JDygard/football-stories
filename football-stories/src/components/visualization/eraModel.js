@@ -15,17 +15,27 @@
 // can't run in the sandbox — see the build-constraint note in the repo docs).
 
 // Bands that show Named Eras at all — i.e. the bands whose layout reserves a
-// plaque row.
-export const ERA_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES", "GAME_BANDS"]);
+// plaque row. EVERY band: whatever you are looking at, the chapter it belongs
+// to should be named. Zoom changes how much of the apparatus survives (see
+// ERA_FRAMED_BANDS), never whether the chapter exists.
+export const ERA_BANDS = new Set([
+  "ERA_SUMMARY",
+  "SEASON_LINES",
+  "GAME_BANDS",
+  "GAME_DETAIL",
+]);
 
-// …and the subset that draws the FRAME around them: the two most zoomed-out
-// rungs, where a multi-decade chapter is compressed enough to read as one
-// shape. At Season by season a single era runs many screens tall, so a box
-// around it stops being a box and becomes a pair of unrelated horizontal rules
-// you meet minutes apart. There the plaque appears alone — the title still
-// tells you which chapter you are in, with no chrome pretending to contain it —
-// and it needs no closing foot either, since there is no border to clear.
-export const ERA_FRAMED_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
+// …and the subset that draws the FRAME around them, which is every band too. A
+// chapter is a container and should look like one wherever you are standing.
+//
+// This was briefly restricted to the two coarsest rungs, on the theory that a
+// border whose left and right edges are both off-screen degrades into two
+// unrelated lines. That undersold what the border does at a fine zoom: it is
+// the TOP and BOTTOM edges you read there, and they say the seasons under your
+// thumb are inside something. Framed everywhere also means the closing foot
+// (ERA_FOOT_H) is bought everywhere — with a border at the bottom there is
+// always something for the last season to clear.
+export const ERA_FRAMED_BANDS = new Set(ERA_BANDS);
 
 // The plaque row: a museum wall label introducing the chapter beneath it. This
 // is a REAL ROW in the layout, not an overlay — buildTimelineLayout adds it to
@@ -62,6 +72,98 @@ export const ERA_YEARS_BASELINE = 26;
 export const ERA_RULE_Y = 38; // short accent rule between the two lines
 export const ERA_RULE_W = 28;
 export const ERA_LABEL_BASELINE = 64;
+
+// ---- the blurb, shown only on the SELECTED chapter -------------------------
+//
+// Desktop hangs the paragraph in a COLUMN to the right of the wall label,
+// because there the plaque is a band across a frame that can be thousands of px
+// wide and its height is fixed. Here the geometry is transposed and so is the
+// answer: a phone has one column of ~340px — already a decent measure for
+// prose — and height it can simply scroll. So the paragraph sits UNDER the
+// title, and the plaque row GROWS to hold it.
+//
+// That growth is real layout, not an overlay: the selected era's first year
+// buys a taller plaque row out of buildTimelineLayout (eraHeaderExtra), exactly
+// the way it buys the standard one. Nothing overlaps, and the seasons below
+// slide down rather than being covered.
+export const ERA_BLURB_FS = 12.5;
+export const ERA_BLURB_LH = 16;
+// First blurb baseline, from the plaque's top. Sits below ERA_LABEL_BASELINE
+// (64) with a clear gap, inside the air the standard 100px row already has.
+export const ERA_BLURB_BASELINE = 92;
+// Air under the last line before the plaque row ends.
+export const ERA_BLURB_PAD_B = 18;
+// A hard ceiling. The blurbs run 40-109 words; at this measure that is roughly
+// 4-11 lines, and a chapter whose prose somehow ran longer should elide rather
+// than push a screen and a half of type between two seasons.
+export const ERA_BLURB_MAX_LINES = 14;
+
+// The measure the paragraph is wrapped to, derived from SCREEN WIDTH ALONE.
+//
+// It has to be, because two different callers need the same answer at two
+// different moments: Main computes it to reserve the taller plaque row BEFORE
+// the layout exists, and buildEraBoxes computes it again to lay the lines out
+// AFTER. Anything the second caller knows and the first doesn't — the
+// personnel rail's width, an unframed band's content margin — would put the two
+// out of step and either overflow the reserved row or leave a gap in it.
+//
+// The right edge is taken as the NARROWEST the frame can be: `width -
+// ERA_EDGE_R`. With a rail the frame actually runs out to `width - PEEK` (3px,
+// see staffRibbonModel), which is wider, so this under-measures there — the
+// safe direction. buildEraBoxes still clamps to the real box, so a band whose
+// text gutter is pushed further right elides instead of spilling.
+export function eraBlurbMeasure(width) {
+  if (!(width > 0)) return 0;
+  const right = width - ERA_EDGE_R;
+  return Math.max(0, right - (ERA_EDGE_L + ERA_TEXT_INSET) - LABEL_PAD_R);
+}
+
+// Greedy wrap against estimateTextWidth. Same shape as the desktop version;
+// pessimism is deliberate (a line estimated slightly wide breaks early, which
+// costs a few px of ragged edge — a line estimated narrow overruns the frame).
+const BLURB_WRAP_PESSIMISM = 1.03;
+
+export function wrapEraBlurb(text, measure, maxLines = ERA_BLURB_MAX_LINES) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length || !(measure > 0)) return [];
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    const nextW = estimateTextWidth(next, ERA_BLURB_FS, "sans") * BLURB_WRAP_PESSIMISM;
+    if (nextW <= measure || !line) {
+      line = next;
+      continue;
+    }
+    lines.push(line);
+    line = w;
+    if (lines.length === maxLines) break;
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  // Ran out of lines with words still in hand: mark the truncation rather than
+  // stopping mid-sentence as though that were the whole thought.
+  const used = lines.join(" ").split(/\s+/).length;
+  if (used < words.length && lines.length) {
+    lines[lines.length - 1] = lines[lines.length - 1].replace(/[,;:]?$/, "") + "…";
+  }
+  return lines;
+}
+
+// Extra plaque height a chapter needs to hold `n` blurb lines, over and above
+// the standard ERA_HEADER_H. Zero when the paragraph fits in the air the plaque
+// already has (a one- or two-line blurb does).
+export function eraBlurbExtraH(n) {
+  if (!n) return 0;
+  const needed = ERA_BLURB_BASELINE + (n - 1) * ERA_BLURB_LH + ERA_BLURB_PAD_B;
+  return Math.max(0, Math.round(needed - ERA_HEADER_H));
+}
+
+// One call, so Main and buildEraBoxes cannot disagree: text + screen width in,
+// wrapped lines and the extra row height out.
+export function eraBlurbLayout(blurb, width) {
+  const lines = wrapEraBlurb(blurb, eraBlurbMeasure(width));
+  return { lines, extraH: eraBlurbExtraH(lines.length) };
+}
 
 export const ERA_LABEL_FS = 19;
 export const ERA_YEARS_FS = 10.5;
@@ -233,7 +335,13 @@ export function eraSpans({ eras, years }) {
 // a border to measure from; with the frame gone the plaque has to line up with
 // whatever the band's content already lines up with (the season page's own left
 // margin), or it reads as an arbitrary indent.
-export function buildEraBoxes({ eras, width, railRight = null, textLeft = null }) {
+export function buildEraBoxes({
+  eras,
+  width,
+  railRight = null,
+  textLeft = null,
+  selectedId = null,
+}) {
   if (!eras?.length || !width) return [];
 
   const x0 = ERA_EDGE_L;
@@ -254,6 +362,17 @@ export function buildEraBoxes({ eras, width, railRight = null, textLeft = null }
     const showYears =
       estimateTextWidth(yearsText, ERA_YEARS_FS, "sans", ERA_YEARS_TRACKING) <= inner;
 
+    // The paragraph, on the selected chapter only. Wrapped to the SCREEN-derived
+    // measure so it matches the row height already reserved for it (see
+    // eraBlurbMeasure), then clamped to whatever this particular box can
+    // actually hold — an unframed band pushes textX right, which narrows the
+    // line without changing what the layout set aside.
+    const selected = selectedId != null && e.id === selectedId;
+    const blurbLines =
+      selected && e.blurb
+        ? wrapEraBlurb(e.blurb, Math.min(eraBlurbMeasure(width), inner))
+        : [];
+
     return {
       ...e,
       x0,
@@ -265,6 +384,12 @@ export function buildEraBoxes({ eras, width, railRight = null, textLeft = null }
       labelText,
       yearsText,
       showYears,
+      selected,
+      blurbLines,
+      // The plaque row's real height: what the layout reserved, which is
+      // ERA_HEADER_H plus the blurb allowance on the selected chapter. Falls
+      // back to the constant for any box built outside a layout (the sims).
+      headerH: e.headerH || ERA_HEADER_H,
     };
   });
 }

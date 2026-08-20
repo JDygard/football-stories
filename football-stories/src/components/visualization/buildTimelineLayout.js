@@ -118,6 +118,13 @@ export function buildTimelineLayout({
   // Curated Named Era rows (segments/teams_eras/{FID}.json -> `eras`), or null
   // when the franchise has none authored / the feature is toggled off.
   eras = null,
+  // { [eraId]: px } — extra plaque height a chapter has asked for, over the
+  // standard ERA_HEADER_H. Today only the SELECTED chapter asks, and only for
+  // room to print its blurb (see eraBlurbLayout in eraModel). It arrives as a
+  // map rather than a single id + height so the layout never has to know what
+  // the extra space is FOR, and so a second reason to grow a plaque needs no
+  // change here.
+  eraHeaderExtra = null,
 }) {
   const geom = geometryFor(detailBand);
   const isPage = geom.season.mode === "page";
@@ -158,7 +165,10 @@ export function buildTimelineLayout({
     // so the chapter's title sits in space nothing else can occupy. When no era
     // opens here `eraLead` is 0 and every line below is unchanged.
     const eraIndex = eraOpensAt.get(year);
-    const eraLead = eraIndex === undefined ? 0 : ERA_HEADER_H;
+    const eraLead =
+      eraIndex === undefined
+        ? 0
+        : ERA_HEADER_H + Math.max(0, eraHeaderExtra?.[spans[eraIndex].id] || 0);
     const blockTop = offY0 + eraLead;
     const reserve = Math.max(0, reserveByYear[year] || 0);
     // Header band height by mode; hidden bands get none (no banner there).
@@ -377,6 +387,10 @@ export function buildTimelineLayout({
     if (eraIndex !== undefined) {
       eraBoxes[eraIndex].y0 = offY0;
       eraBoxes[eraIndex].contentY = blockTop;
+      // The plaque row's height travels with the box, so the renderer draws
+      // into exactly the space that was bought for it rather than re-deriving
+      // it and risking a different answer.
+      eraBoxes[eraIndex].headerH = eraLead;
     }
     for (const box of eraBoxes) {
       if (year >= box.firstYear && year <= box.lastYear) box.y1 = seaY1;

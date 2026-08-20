@@ -59,8 +59,10 @@ import DesktopEraLayer from "./DesktopEraLayer.jsx";
 import {
   buildEraBoxes,
   ERA_HEADER_H,
+  ERA_HEADER_COMPACT_H,
   ERA_BORDER_W,
   ERA_RAIL_GAP,
+  eraZoneFor,
 } from "./desktopEraModel.js";
 import {
   buildSuperBowlCrowns, crownedYears, medalFrameWidth, CROWN_ZONE,
@@ -125,12 +127,20 @@ const LANE_MAX = 400;
 // past the bottom of its own lane on a short window.
 const LANE_MIN = 152;
 
-// NAMED ERAS ride only the two coarsest rungs. Lower down, a single era is
-// wider than the window and its frame would be two vertical lines with no
-// visible relationship — the shape only means something once the whole span
-// fits on screen. (Named Eras are the curated data layer; "Eras" the zoom
-// level is ERA_SUMMARY. See desktopEraModel.js.)
-const ERA_FRAME_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES"]);
+// NAMED ERAS appear at every rung, framed, washed and labelled. Whatever you
+// are looking at, the chapter it belongs to should be named AND drawn as the
+// container it is.
+//
+// The border was briefly dropped at the game zooms, where an era is several
+// windows wide and both vertical edges are off-screen most of the time. But at
+// that zoom it is the TOP and BOTTOM edges you read, and they are the thing
+// saying the seasons in front of you sit inside something. What handles the
+// off-screen left edge is not removing the frame — it is the sliding wall
+// label (see DesktopEraLayer), which follows you along the chapter.
+//
+// (Named Eras are the curated data layer; "Eras" the zoom level is
+// ERA_SUMMARY. See desktopEraModel.js.)
+const ERA_FRAME_BANDS = new Set(["ERA_SUMMARY", "SEASON_LINES", "GAME_BANDS", "GAME_DETAIL"]);
 
 // The bands where a Super Bowl becomes a CROWN. Deliberately its own set rather
 // than a reference to ERA_FRAME_BANDS, which happens to hold the same two names
@@ -696,7 +706,9 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
         : [],
     [eras, layout, focusedEraId],
   );
-  const showEras = eraBoxes.length > 0 && ERA_FRAME_BANDS.has(band);
+  const showEras = eraBoxes.length > 0;
+  // …and whether the chapter gets its box, or only its wall label.
+  const eraFramed = ERA_FRAME_BANDS.has(band);
 
   // Super Bowl crowns. Built off the FULL block list, not `visible`, so a
   // merged run keeps its shape while it scrolls in from off-screen — deciding
@@ -716,12 +728,6 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   const topZone = pillPlan.entryRows ? pillPlan.entryRows * PILL_ROW_H + 6 : 10;
   const axisH = offMode === "hidden" ? AXIS_H : 0;
   const railBlock = railH ? RAIL_PAD + railH : 0;
-  // The era header strip is a REAL ROW in the assembly, not an overlay: it buys
-  // its height from the same budget as everything else, so era titles sit above
-  // the timeline instead of on top of it.
-  // Constant. The blurb sets in a column beside the wall label and uses the
-  // band's HEIGHT, so selecting a chapter never reflows the timeline vertically.
-  const eraZoneH = showEras ? ERA_HEADER_H : 0;
   // A crown rises CROWN_ZONE above the lane. With eras on that fits inside the
   // header band's own bottom air — the band is 132 tall and its text stops at
   // the record baseline (92), so the crown costs NOTHING there and the timeline
@@ -733,6 +739,23 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   const botZone = railH
     ? PEEK + (pillPlan.exitRows ? pillPlan.exitRows * PILL_ROW_H + 6 : 8)
     : 8;
+
+  // THE ERA PLAQUE IS A REAL ROW in the assembly, not an overlay — it buys its
+  // height from the same budget as everything else. And it buys it LAST:
+  // everything above is measured first, the lane is guaranteed its floor, and
+  // the plaque takes what remains — the full 132 if the window can spare it,
+  // the compact 40 if it cannot, nothing at all if even that would eat in. On a
+  // 600px window the unconditional 132 pushed the year row and the draft
+  // columns under the control dock, which is a chapter heading eating the
+  // timeline it heads.
+  const eraOtherFixed = crownZoneH + topZone + axisH + railBlock + botZone;
+  const eraZoneH = eraZoneFor({
+    show: showEras,
+    height,
+    otherFixed: eraOtherFixed,
+    laneMin: LANE_MIN,
+  });
+  const eraCompact = eraZoneH > 0 && eraZoneH < ERA_HEADER_H;
   const fixedH = eraZoneH + crownZoneH + topZone + axisH + railBlock + botZone;
   const laneH = Math.max(LANE_MIN, Math.min(LANE_MAX, height - 16 - fixedH));
   const assemblyH = fixedH + laneH;
@@ -923,6 +946,7 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
           top={eraTop}
           bottom={eraBottom}
           layer="wash"
+          compact={eraCompact}
           focusedEraId={focusedEraId}
         />
       )}
@@ -1041,6 +1065,9 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
           top={eraTop}
           bottom={eraBottom}
           layer="plaque"
+          framed={eraFramed}
+          compact={eraCompact}
+          scrollX={scrollX}
           onFocusEra={onFocusEra}
           focusedEraId={focusedEraId}
           tapGuard={tapGuard}

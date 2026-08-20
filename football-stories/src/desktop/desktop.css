@@ -96,3 +96,25 @@
   @keyframes desktop-sweep-out-back { from { opacity: 1; } to { opacity: 0; } }
   @keyframes desktop-sweep-in-back { from { opacity: 0; } to { opacity: 1; } }
 }
+
+/* THE TIMELINE IS A DRAGGABLE SURFACE, and has to look like one. Drag is the
+   primary lateral navigation on desktop (the wheel is spent on zoom — see the
+   note atop useDesktopViewport.js), so the default arrow cursor left the main
+   gesture completely unadvertised.
+
+   Set on the scroll container, so it inherits across the whole timeline. Marks
+   that are their OWN targets — ribbons, career pills, draft rows — set
+   `cursor: pointer` on themselves and win over this, which is what keeps
+   "you can drag the canvas" and "you can click this thing" both legible.
+
+   :active rather than a React state flag on purpose: the browser already
+   tracks the press, and threading an isDragging boolean through the hook to
+   toggle a style would re-render the timeline on every gesture. The trade is
+   that pressing a clickable mark also shows `grabbing` for as long as the
+   button is held — which is honest, since that press can still become a drag. */
+.desk-timeline-scroll {
+  cursor: grab;
+}
+.desk-timeline-scroll:active {
+  cursor: grabbing;
+}

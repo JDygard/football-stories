@@ -1,7 +1,12 @@
 // Inline ribbon controls — lives inside the footer drawer (mobile) and the
 // right sidebar (desktop).
-//   - Staff role toggles: coaches / GMs / owners independently.
-//   - Individual players: click any row to add/remove its ribbon. Adding one
+//   - EVERY track is a row: coaches, GMs and owners sit in the same list as
+//     players, filtered by the same chip row, toggled the same way. They used
+//     to be three all-or-nothing checkboxes governing a separate mechanism,
+//     which meant two systems decided what the rail showed and they could
+//     disagree (a chapter's own coach could be hidden by a toggle). One list,
+//     one mechanism.
+//   - Individual tracks: click any row to add/remove its ribbon. Adding one
 //     also scrolls the timeline to that stint (onFocusYear) so you land on
 //     the track you just switched on instead of hunting for it.
 //   - Bulk: pick a position chip, then "+ add all who played" — adds every
@@ -17,7 +22,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import useTeamTenures, { tenureKey } from "../hooks/useTeamTenures.js";
-import { roleColor, positionGroup } from "./visualization/staffRibbonModel.js";
+import { roleColor, trackGroup } from "./visualization/staffRibbonModel.js";
 
 // Selection guard. Concurrency is what actually matters visually (tail
 // slots are reused after a tenure ends, and >5 concurrent collapses to
@@ -26,25 +31,29 @@ export const MAX_PLAYERS = 40;
 
 const PAGE = 50;
 
+// Staff categories lead, because there are a handful of them against hundreds
+// of players and they are what you reach for when reading a franchise's shape.
 const GROUPS = [
   ["all", "All"],
+  ["coach", "Coaches"], ["gm", "GMs"], ["owner", "Owners"],
   ["qb", "QB"], ["rb", "RB"], ["wr", "WR"], ["te", "TE"],
   ["ol", "OL"], ["dl", "DL"], ["lb", "LB"], ["db", "DB"], ["st", "ST"],
 ];
 
-const ROLES = [
-  ["coach", "Coaches"],
-  ["gm", "GMs"],
-  ["owner", "Owners"],
-];
+const ROLE_LABEL = { coach: "Coach", gm: "GM", owner: "Owner", unknown: "Staff" };
 
 // "Took snaps" proxy: career games when we know them (approx tenures carry
-// games); pipeline roster rows count as played (you were on a roster).
-const played = (t) => (t.games == null ? true : t.games > 0);
+// games); pipeline roster rows count as played (you were on a roster). A
+// staffer never took a snap and the question does not apply to them.
+const played = (t) => (t.kind === "staff" ? true : t.games == null ? true : t.games > 0);
 
 export default function RibbonControls({
   teamId,
   draftSegment,
+  // The franchise's coaching/front-office rows (mapped.staff). They arrive as
+  // a prop rather than being fetched here because the shell already holds them
+  // — they ride the team segment, not the tenure segment.
+  staff = null,
   config,
   onChange,
   // Optional: called with the stint's first year when a track is switched ON,
@@ -53,7 +62,7 @@ export default function RibbonControls({
   // and career-follow use).
   onFocusYear = null,
 }) {
-  const { tenures, source } = useTeamTenures(teamId, draftSegment);
+  const { tenures, source } = useTeamTenures(teamId, draftSegment, staff);
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("all");
   const [visibleCount, setVisibleCount] = useState(PAGE);
@@ -72,7 +81,7 @@ export default function RibbonControls({
     const q = query.trim().toLowerCase();
     return tenures
       .filter((t) => t.name)
-      .filter((t) => group === "all" || positionGroup(t.position) === group)
+      .filter((t) => group === "all" || trackGroup(t) === group)
       .filter((t) => !q || t.name.toLowerCase().includes(q))
       // Longest stint with THIS franchise first. Playing time is what you
       // actually want at the top of a 700-row list, and seasons-here is the
@@ -90,13 +99,6 @@ export default function RibbonControls({
   }, [tenures, query, group]);
 
   const shown = matches.slice(0, visibleCount);
-
-  const toggleRole = (role) => {
-    onChange({
-      ...config,
-      roles: { ...config.roles, [role]: config.roles[role] === false },
-    });
-  };
 
   // Toggling is per STINT: removing Cam Newton's 2021 cameo must leave his
   // 2011-2019 run on the timeline, so this filters by key, not player_id.
@@ -147,27 +149,10 @@ export default function RibbonControls({
           borderBottom: "1px solid #e8eaef",
         }}
       >
-        {ROLES.map(([role, label]) => (
-          <label key={role} style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={config.roles[role] !== false}
-              onChange={() => toggleRole(role)}
-            />
-            <span style={{
-              width: 9, height: 9, borderRadius: 2, display: "inline-block",
-              background: roleColor(role),
-            }} />
-            {label}
-          </label>
-        ))}
-
-        <span style={{ width: 1, height: 18, background: "#ddd" }} />
-
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search to add a player…"
+          placeholder="Search to add a track…"
           style={{
             width: 180, height: 24, padding: "0 8px", fontSize: 12,
             borderRadius: 4, border: "1px solid #ccc", outline: "none",
@@ -178,7 +163,7 @@ export default function RibbonControls({
             <button
               key={id}
               onClick={() => setGroup(id)}
-              title={id === "all" ? "Show all positions" : `Filter to ${label}`}
+              title={id === "all" ? "Show every track" : `Filter to ${label}`}
               style={{
                 border: "none", borderRadius: 5, padding: "3px 8px",
                 fontSize: 11, cursor: "pointer",
@@ -195,7 +180,7 @@ export default function RibbonControls({
         <button
           onClick={addAll}
           disabled={atCap || !bulkCandidates.length}
-          title="Adds everyone in the current filter who took the field (games > 0); never-played picks are skipped"
+          title="Adds everyone in the current filter who took the field (games > 0); never-played picks are skipped. Staff always count as having served."
           style={{
             border: "1px solid #c9d4e8",
             borderRadius: 5,
@@ -213,7 +198,7 @@ export default function RibbonControls({
 
         <div style={{ flex: 1 }} />
         <span style={{ color: "#666", fontSize: 11.5 }}>
-          <b>{nSel}</b> player track{nSel === 1 ? "" : "s"} (max {MAX_PLAYERS})
+          <b>{nSel}</b> track{nSel === 1 ? "" : "s"} (max {MAX_PLAYERS})
           {nSel > 0 && (
             <button
               onClick={clearPlayers}
@@ -258,7 +243,7 @@ export default function RibbonControls({
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {(config.players || []).map((p) => {
-              const g = positionGroup(p.position);
+              const g = trackGroup(p);
               return (
                 <button
                   key={tenureKey(p)}
@@ -284,7 +269,7 @@ export default function RibbonControls({
                   {/* Years, because a player can be here twice — two "Cam
                       Newton" chips are otherwise indistinguishable. */}
                   <span style={{ color: "#999" }}>
-                    {p.position || ""} {p.from}–{p.to}
+                    {p.kind === "staff" ? ROLE_LABEL[p.role] || "Staff" : p.position || ""} {p.from}–{p.to}
                     {p.source === "approx" ? " ~" : ""}
                   </span>
                   <span style={{ color: "#aab", fontWeight: 700, fontSize: 14, lineHeight: 1 }}>×</span>
@@ -305,7 +290,7 @@ export default function RibbonControls({
         </div>
         {shown.map((t) => {
           const on = selectedKeys.has(tenureKey(t));
-          const g = positionGroup(t.position);
+          const g = trackGroup(t);
           const sat = played(t);
           return (
             <div
@@ -329,7 +314,9 @@ export default function RibbonControls({
                 {t.name}
                 {!sat && <span style={{ fontWeight: 400, fontSize: 10.5 }}> · never played</span>}
               </span>
-              <span style={{ color: "#888", width: 30 }}>{t.position || "—"}</span>
+              <span style={{ color: "#888", width: 34 }}>
+                {t.kind === "staff" ? ROLE_LABEL[t.role] || "Staff" : t.position || "—"}
+              </span>
               <span style={{ color: "#888" }}>
                 {t.from}–{t.to}
                 {t.source === "approx" ? "~" : ""}

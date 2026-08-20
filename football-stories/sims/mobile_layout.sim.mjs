@@ -213,11 +213,15 @@ for (let i = 1; i < spans.length; i++) ok(spans[i].tone !== spans[i - 1].tone, `
 ok(eraTone(0).border !== eraTone(1).border, "tones are visually distinct");
 ok(eraTone(ERA_TONE_COUNT).wash === eraTone(0).wash, "tone palette wraps");
 
-// Season by season shows the headers with no box, so it reserves plaque rows
-// but no closing feet; the two coarsest rungs do both; Every Game does neither.
-ok(ERA_BANDS.has("GAME_BANDS") && !ERA_FRAMED_BANDS.has("GAME_BANDS"),
-  "Season by season: era headers, no frame");
-ok(!ERA_BANDS.has("GAME_DETAIL"), "Every Game shows no eras at all");
+// EVERY rung names the chapter you are in AND draws the box around it, so every
+// rung buys both a plaque row and a closing foot. The two sets are the same set
+// now; they stay separate names because the layout asks two different questions
+// of them (does this band reserve a plaque? does it reserve a foot?) and a
+// future band could legitimately answer them differently.
+for (const b of MOBILE_BANDS) {
+  ok(ERA_BANDS.has(b), `${b}: shows its eras`);
+  ok(ERA_FRAMED_BANDS.has(b), `${b}: frames its eras`);
+}
 for (const b of ERA_FRAMED_BANDS) ok(ERA_BANDS.has(b), `${b}: framed implies shown`);
 
 for (const [i, L] of eraLayouts.entries()) {
