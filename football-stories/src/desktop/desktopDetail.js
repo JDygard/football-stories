@@ -10,7 +10,11 @@
 // Deliberately a separate file from the mobile geometry so desktop tuning
 // never touches the phone layout.
 
-import { DETAIL_BANDS, DEFAULT_BAND } from "../components/visualization/detail.js";
+import {
+  DETAIL_BANDS,
+  DEFAULT_BAND,
+  MENU_BAND,
+} from "../components/visualization/detail.js";
 
 // Shared, orientation-agnostic band machinery re-exported for desktop callers
 // so they never need to import from the mobile tree directly.
@@ -22,6 +26,8 @@ export {
   zoomLabelFor,
   bandRank,
   bandAtLeast,
+  MENU_BAND,
+  isMenuBand,
 } from "../components/visualization/detail.js";
 
 // The DESKTOP ZOOM LADDER. The glossary defines exactly four user-facing rungs
@@ -34,6 +40,15 @@ export {
 // MOBILE_BANDS, for the same reason. Everything that walks the ladder (band
 // layouts, zoom picking, the HUD) must iterate THIS list, not DETAIL_BANDS.
 export const DESKTOP_BANDS = DETAIL_BANDS.filter((b) => b !== "FRANCHISE_OVERVIEW");
+
+// The full desktop ZOOM LADDER: the four timeline bands, then the menu rung
+// (src/menu/) that the window opens on. Kept separate from DESKTOP_BANDS
+// because the two lists answer different questions — DESKTOP_BANDS is "which
+// layouts exist", DESKTOP_ZOOM_BANDS is "which stops the gesture walks". Only
+// useDesktopViewport wants the second one; everything that builds or reads a
+// layout still wants the first. See MENU_BAND in the mobile detail module for
+// why the menu is not simply appended to DETAIL_BANDS.
+export const DESKTOP_ZOOM_BANDS = [...DESKTOP_BANDS, MENU_BAND];
 
 // Per-band geometry consumed by buildDesktopLayout.
 //   season.mode: "rows" -> a fixed-width COLUMN holding one horizontal row per

@@ -28,12 +28,28 @@ import {
   useState,
 } from "react";
 import { buildTimelineLayout } from "../components/visualization/buildTimelineLayout.js";
-import { MOBILE_BANDS } from "../components/visualization/detail.js";
+import { MOBILE_BANDS, MOBILE_ZOOM_BANDS } from "../components/visualization/detail.js";
+import {
+  MENU_SLIDE_COUNT,
+  menuScrollExtent,
+  slideOffset,
+  IDLE_MS,
+  slideTargetFor,
+  trackSample,
+  velocityOf,
+} from "../menu/menuModel.js";
 import { clamp, expSmooth, pickBand, visualScaleFor } from "./zoomMath.js";
 
-// The phone ladder stops at ERA_SUMMARY: DETAIL_BANDS' two coarse bands share
-// zoom rung 1, so walking through both gave two consecutive "Eras" stops.
-const N = MOBILE_BANDS.length;
+// TWO lists, and the difference matters. The phone ladder stops at ERA_SUMMARY
+// (DETAIL_BANDS' two coarse bands share zoom rung 1, so walking through both
+// gave two consecutive "Eras" stops) — those are the bands that have LAYOUTS.
+// The ladder the gesture walks has one more stop on the far end: the MENU rung,
+// which has no layout at all because it draws no franchise (src/menu/). So
+// `layouts` and `bandHeights` are no longer the same length, and every index
+// into `layouts` is clamped to TIMELINE_N - 1.
+const TIMELINE_N = MOBILE_BANDS.length;
+const N = MOBILE_ZOOM_BANDS.length;
+const MENU_INDEX = N - 1;
 const TAP_SLOP = 5; // px of pointer travel before a press counts as a drag
 // Horizontal reveal: a one-finger gesture locks to "h" only when it clearly
 // beats vertical (AXIS_BIAS) — otherwise the browser scrolls. The rail opens to
@@ -53,6 +69,10 @@ const ANIM_TAU = 55; // ms time constant for the zoom-settle ease
 // pickBand's e^(2*hyst) ≈ 1.271 reachability threshold with a little room; see
 // the bandHeights note below for why the real heights don't always manage it.
 const MIN_BAND_RATIO = 1.3;
+// Menu rung: how long the scroller has to be quiet before the strip settles
+// onto the nearest slide, and how close counts as already there.
+const SETTLE_MS = 140;
+const SETTLE_EPS = 1;
 
 export default function useTimelineViewport({
   seasons,
@@ -63,7 +83,9 @@ export default function useTimelineViewport({
   // down by its live height (staffRibbonModel.maxStackHeight).
   ribbonSlack = 0,
   height = 0,
-  initialBandIndex = 2, // SEASON_LINES
+  // The app OPENS on the menu rung — it is the start page, not a level you
+  // have to go looking for.
+  initialBandIndex = MENU_INDEX,
   focusYear = null,
   onFocusConsumed = null,
   showPlayoffs = true,
@@ -134,15 +156,24 @@ export default function useTimelineViewport({
   // every rung stable and reachable once corrected.
   const bandHeights = useMemo(() => {
     const out = layouts.map((l) => Math.max(1, l.totalHeight));
+    // The MENU rung is exactly ONE SCREENFUL of apparent content — a slide, not
+    // the whole strip. Its scroll extent is several screens (the slides), but
+    // that is paging, not zoom, and feeding the strip's length in here would
+    // put the menu somewhere up the middle of the ladder.
+    out.push(Math.max(1, height || 640));
     for (let i = out.length - 2; i >= 0; i--) {
       out[i] = Math.max(out[i], out[i + 1] * MIN_BAND_RATIO);
     }
     return out;
-  }, [layouts]);
+  }, [layouts, height]);
 
-  const layout = layouts[clamp(bandIndex, 0, N - 1)];
-  // scrollRange = the timeline plus room for the ribbon stack it hides behind.
-  const scrollRange = layout.totalHeight + ribbonSlack;
+  const menu = bandIndex === MENU_INDEX;
+  // No layout for the menu rung; it keeps the coarsest one mounted underneath
+  // so that leaving the menu lands back on a real band with a real scroll range.
+  const layout = layouts[clamp(bandIndex, 0, TIMELINE_N - 1)];
+  // scrollRange = the timeline plus room for the ribbon stack it hides behind —
+  // or, at the menu rung, the slide strip the same scroller pages through.
+  const scrollRange = menu ? menuScrollExtent(height) : layout.totalHeight + ribbonSlack;
   const maxScroll = Math.max(0, scrollRange - height);
   const scrollY = clamp(scrollYState, 0, maxScroll);
 
@@ -157,6 +188,9 @@ export default function useTimelineViewport({
   heightRef.current = height;
   const bandHeightsRef = useRef(bandHeights);
   bandHeightsRef.current = bandHeights;
+  // Read from scroll/pointer callbacks, which must not close over a stale rung.
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
   const anchorYRef = useRef(0);
 
   const gestureHRef = useRef(bandHeights[initialBandIndex]);
@@ -186,7 +220,103 @@ export default function useTimelineViewport({
     setScrollY(ny);
   }, []);
 
+  // ---- menu rung: settle onto the nearest slide -----------------------------
+  //
+  // The strip pages instagram-style, and the obvious way to get that is CSS
+  // scroll-snap. It does not work here, and the reason is worth writing down:
+  // this container carries a NON-PASSIVE wheel listener (it has to — the zoom
+  // gesture must be able to preventDefault), which takes wheel scrolling off
+  // the compositor. Main-thread scrolling with `scroll-snap-type: mandatory`
+  // re-snaps after every individual delta, so each notch of a swipe was pulled
+  // straight back to the slide it started on and the strip could not be paged
+  // at all. Programmatic scrolling — which is how the desktop drag-pan moves
+  // this same element — is re-snapped the same way, so a drag would have been
+  // just as stuck.
+  //
+  // So the paging is ours: scroll freely, and when the scroller goes quiet with
+  // no finger down, ease to the nearest slide.
+  const settleTimerRef = useRef(0);
+  const gesturingRef = useRef(false);
+  // Trailing scrollTop samples, for the speed of a released swipe.
+  //
+  // Sampled from the SCROLL events, and the decision is made when scrolling
+  // STOPS rather than when the pointer lifts. That is not a preference, it is
+  // forced: Chromium fires `pointercancel` on a touch pointer the moment it
+  // takes the gesture over for scrolling, so a pointerup/cancel handler runs at
+  // the START of a swipe, when the strip has barely moved and its velocity is
+  // nil. Deciding there turned every flick into "stay where you are" — the bug
+  // that made this page unswipeable.
+  const samplesRef = useRef([]);
+  // The velocity the strip had when it was LAST ACTUALLY MOVING. By the time
+  // the settle fires everything is at rest, so the live velocity is zero and
+  // useless; this is the reading from the final scroll event before the stall.
+  // It also self-corrects for platform momentum: if the browser coasted, that
+  // last reading is the decayed tail and the projection adds almost nothing on
+  // top of the distance already travelled; if it didn't, it is the full flick.
+  const lastVRef = useRef(0);
+  const lastSampleTRef = useRef(0);
+  // Which slide the current scroll SEQUENCE started on.
+  const gestureStartSlideRef = useRef(0);
+  const scrollingRef = useRef(false);
+
+  const scrollToSlide = useCallback(
+    (i) => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const span = Math.max(1, heightRef.current);
+      const y = slideOffset(clamp(i, 0, MENU_SLIDE_COUNT - 1), span);
+      if (Math.abs(el.scrollTop - y) < SETTLE_EPS) return;
+      if (el.scrollTo) el.scrollTo({ top: y, behavior: "smooth" });
+      else setScrollTop(y);
+    },
+    [setScrollTop],
+  );
+
+  // Land the strip, judging the swipe on INTENT rather than on how far it
+  // happened to get. Without the velocity term the strip only moved when a
+  // drag crossed the halfway line — half a screen — and nobody swipes that way.
+  const settleToSlide = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = slideTargetFor({
+      scroll: el.scrollTop,
+      span: Math.max(1, heightRef.current),
+      startSlide: gestureStartSlideRef.current,
+      velocity: lastVRef.current,
+    });
+    scrollingRef.current = false;
+    lastVRef.current = 0;
+    samplesRef.current = [];
+    scrollToSlide(target);
+  }, [scrollToSlide]);
+
+  const scheduleSettle = useCallback(() => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => {
+      settleTimerRef.current = 0;
+      if (!menuRef.current || gesturingRef.current) return;
+      settleToSlide();
+    }, SETTLE_MS);
+  }, [settleToSlide]);
+
   const onScroll = useCallback(() => {
+    if (menuRef.current) {
+      const el = scrollRef.current;
+      if (el) {
+        const span = Math.max(1, heightRef.current);
+        if (!scrollingRef.current) {
+          // First movement of a new sequence: this is the page the swipe began
+          // on, which is what "at least one page" is measured from.
+          scrollingRef.current = true;
+          samplesRef.current = [];
+          gestureStartSlideRef.current = Math.round(el.scrollTop / span);
+        }
+        lastSampleTRef.current = performance.now();
+        trackSample(samplesRef.current, el.scrollTop, lastSampleTRef.current);
+        lastVRef.current = velocityOf(samplesRef.current);
+      }
+      scheduleSettle();
+    }
     if (scrollRafRef.current) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = 0;
@@ -196,38 +326,71 @@ export default function useTimelineViewport({
       scrollYRef.current = y;
       setScrollY(y);
     });
-  }, []);
+  }, [scheduleSettle]);
 
   // Pending zoom anchor: keep the focal year under the cursor after a band
   // switch reflows the stack (and totalHeight/scroll range changes).
   const anchorRef = useRef(null);
+  // Where the timeline was standing when the menu took the scroller over.
+  const parkedScrollRef = useRef(0);
   useLayoutEffect(() => {
     const a = anchorRef.current;
     if (!a) return;
     anchorRef.current = null;
+    // An absolute target: crossing into or out of the menu, where the scroll
+    // axis changes meaning and there is no focal year to pin.
+    if (a.scrollTo != null) {
+      setScrollTop(a.scrollTo);
+      return;
+    }
     const targetContentY = layout.tToY(a.focusT);
     setScrollTop(targetContentY - a.cursorY);
-  }, [layout, setScrollTop]);
+    // `bandIndex` is a dependency because crossing the Eras/menu boundary does
+    // NOT change `layout` (the menu keeps the coarsest one mounted), so the
+    // effect would otherwise never run for exactly the switch that needs it.
+  }, [layout, bandIndex, setScrollTop]);
+
+  // Commit a band switch while pinning the focal year under the anchor. Reads
+  // the OLD layout to find the focal year; the layout effect above fixes scroll
+  // once the new band renders.
+  const commitBand = useCallback((nb) => {
+    const from = bandIndexRef.current;
+    if (nb === MENU_INDEX) {
+      // Into the menu: the scroller stops being the timeline and becomes the
+      // slide strip, so there is no year to pin. Park where the timeline was
+      // and open the menu on its first page.
+      parkedScrollRef.current = scrollYRef.current;
+      anchorRef.current = { scrollTo: 0 };
+    } else if (from === MENU_INDEX) {
+      // Back out of the menu: return the reader to where they left the
+      // timeline rather than to whichever slide they happened to stop on.
+      anchorRef.current = { scrollTo: parkedScrollRef.current };
+    } else {
+      const old = layoutsRef.current[clamp(from, 0, TIMELINE_N - 1)];
+      const focusT = old.yToYear(scrollYRef.current + anchorYRef.current);
+      anchorRef.current = { focusT, cursorY: anchorYRef.current };
+    }
+    bandIndexRef.current = nb;
+    setBandIndex(nb);
+  }, []);
 
   // Deep-link: scroll so focusYear sits in the upper quarter of the view, then
   // hand the target back (leaderboard rows, career-follow jumps).
   useLayoutEffect(() => {
     if (focusYear == null) return;
     if (!layout?.blocks?.length || !height) return;
+    // A deep link — a personnel track switched on, a leaderboard row, a career
+    // follow — is a request to LOOK AT something on the timeline. If it arrives
+    // while the menu has the surface, the menu steps aside and the effect runs
+    // again on the next commit (hence `bandIndex` in the deps) to do the scroll.
+    if (bandIndexRef.current === MENU_INDEX) {
+      commitBand(TIMELINE_N - 1);
+      return;
+    }
     setScrollTop(layout.yearToY(focusYear) - height * 0.25);
     if (onFocusConsumed) onFocusConsumed();
-  }, [focusYear, layout, height, onFocusConsumed, setScrollTop]);
+  }, [focusYear, layout, bandIndex, height, onFocusConsumed, setScrollTop, commitBand]);
 
-  // Commit a band switch while pinning the focal year under the anchor. Reads
-  // the OLD layout to find the focal year; the layout effect above fixes scroll
-  // once the new band renders.
-  const commitBand = useCallback((nb) => {
-    const old = layoutsRef.current[bandIndexRef.current];
-    const focusT = old.yToYear(scrollYRef.current + anchorYRef.current);
-    anchorRef.current = { focusT, cursorY: anchorYRef.current };
-    bandIndexRef.current = nb;
-    setBandIndex(nb);
-  }, []);
 
   const applyGestureH = useCallback(
     (h) => {
@@ -299,6 +462,10 @@ export default function useTimelineViewport({
   // canvas then renders scaled about scaleAnchorY, which slides the pinned
   // ribbon stack off the top of the viewport (a few px of phantom offset above
   // the first ribbon, at every zoom). At rest the scale is 1 by definition.
+  // `bandIndex` joined the deps when the menu rung arrived: a band can now be
+  // committed WITHOUT a gesture (a deep link pulling the reader out of the
+  // menu), and the resting gestureH has to follow it or the next pinch would
+  // start from the height of the band they just left.
   useEffect(() => {
     if (!rafRef.current && !pinchActiveRef.current) {
       gestureHRef.current = bandHeights[bandIndexRef.current];
@@ -306,7 +473,7 @@ export default function useTimelineViewport({
       setVisualScale(1);
       setScaleAnchorY(0);
     }
-  }, [bandHeights]);
+  }, [bandHeights, bandIndex]);
 
   // ---- native listeners: ctrl/⌘+wheel zoom + multi-touch scroll suppressor ----
   // Bound via addEventListener (non-passive) because React's synthetic wheel/
@@ -390,6 +557,7 @@ export default function useTimelineViewport({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (railSpringRef.current) cancelAnimationFrame(railSpringRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     },
     [],
   );
@@ -430,22 +598,42 @@ export default function useTimelineViewport({
   //      scroll is native; two-finger pinch is owned by the touch listeners
   //      above (and bails this handler via pinchActiveRef). ----
   const dragXRef = useRef(null);
+  const dragYRef = useRef(null);
   const pressXRef = useRef(null);
   const pressYRef = useRef(null);
   const axisRef = useRef(null); // null | "h" | "v"
   const movedRef = useRef(false);
+  // Pointer id captured for an in-flight rail drag, or null. Only ever set once
+  // a press has been promoted to a drag — see onPointerDown.
+  const capturedIdRef = useRef(null);
 
   const onPointerDown = useCallback(
     (e) => {
       stopRailSpring();
-      // Capturing a TOUCH pointer would steal it from the native scroller; only
-      // capture the mouse (which never triggers native scroll anyway).
-      if (e.pointerType === "mouse") e.currentTarget.setPointerCapture?.(e.pointerId);
+      // DELIBERATELY NOT capturing the pointer here — the same bug the desktop
+      // tree was fixed for, still live in this one because a phone is normally
+      // driven by touch and touch pointers were never captured.
+      //
+      // While a pointer is captured, Chrome retargets the compatibility mouse
+      // events — mousedown, mouseup and crucially CLICK — to the capturing
+      // element. Capturing on pointerdown therefore sent every mouse click to
+      // this scroll container instead of whatever was under the cursor, and no
+      // onClick inside the pane ever ran. It surfaced when the menu-zoom rung
+      // put real buttons in here (its call to action did nothing to a mouse);
+      // it was equally true of every ribbon and draft row before that.
+      //
+      // Capture is taken in onPointerMove instead, once the gesture has become
+      // a rail drag — at which point retargeting the trailing click away from
+      // whatever was under the cursor is exactly what we want.
       pressXRef.current = e.clientX;
       pressYRef.current = e.clientY;
       dragXRef.current = e.clientX;
+      dragYRef.current = e.clientY;
       axisRef.current = null;
       movedRef.current = false;
+      // A finger on the glass suspends the menu strip's settle: the reader is
+      // mid-swipe and the slide they land on is theirs to choose.
+      gesturingRef.current = true;
     },
     [stopRailSpring],
   );
@@ -460,8 +648,16 @@ export default function useTimelineViewport({
         if (Math.max(Math.abs(tdx), Math.abs(tdy)) > TAP_SLOP) {
           axisRef.current = Math.abs(tdx) > Math.abs(tdy) * AXIS_BIAS ? "h" : "v";
           movedRef.current = true;
+          // Now it is a drag, so take the pointer: the rail keeps tracking if
+          // the cursor leaves the container mid-drag. Mouse only — capturing a
+          // TOUCH pointer would steal it from the native scroller.
+          if (e.pointerType === "mouse" && capturedIdRef.current == null) {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            capturedIdRef.current = e.pointerId;
+          }
         } else {
           dragXRef.current = e.clientX;
+          dragYRef.current = e.clientY;
           return;
         }
       }
@@ -471,20 +667,34 @@ export default function useTimelineViewport({
         applyRailPan(
           clamp(railPanRef.current + dx * RAIL_RESIST, -RAIL_MAX_REVEAL, RAIL_MAX_REVEAL),
         );
+      } else if (menuRef.current && e.pointerType === "mouse") {
+        // MOUSE DRAG on the menu strip, and only there. A finger scrolls this
+        // container natively, but a mouse never does — browsers do not scroll
+        // on a drag — so on the phone layout in a desktop window (a narrow
+        // browser, or ?view=mobile) the start page's one teaching gesture was
+        // simply dead. Dragging it by hand costs nothing here because the strip
+        // pages rather than free-scrolls; the TIMELINE deliberately keeps its
+        // native-scroll model and is untouched.
+        const dy = e.clientY - dragYRef.current;
+        const el = scrollRef.current;
+        if (el && dy !== 0) el.scrollTop -= dy; // scroll event mirrors into state
       }
-      // axis === "v": let the browser scroll natively; nothing to do.
+      dragYRef.current = e.clientY;
+      // axis === "v" on touch: let the browser scroll natively; nothing to do.
     },
     [applyRailPan],
   );
 
   const endPointer = useCallback(
     (e) => {
-      if (e.pointerType === "mouse") {
+      // Release only what we actually captured (a plain click never captures).
+      if (capturedIdRef.current != null) {
         try {
-          e.currentTarget.releasePointerCapture?.(e.pointerId);
+          e.currentTarget.releasePointerCapture?.(capturedIdRef.current);
         } catch {
-          /* ignore */
+          /* the pointer may already be gone */
         }
+        capturedIdRef.current = null;
       }
       if (axisRef.current === "h") {
         // Detent: pulled far enough -> lock OPEN at RAIL_LOCK_POS, else close to
@@ -500,8 +710,27 @@ export default function useTimelineViewport({
       axisRef.current = null;
       pressXRef.current = null;
       pressYRef.current = null;
+      dragYRef.current = null;
+      gesturingRef.current = false;
+
+      // The page turn is NOT decided here — see samplesRef. A touch pointer is
+      // cancelled the instant the browser starts scrolling, so this runs at the
+      // beginning of a swipe, not its end. All this does is let the settle run.
+      if (menuRef.current) {
+      // THE PAUSE RULE, applied at the one moment it can be. A gesture that
+      // ended in a pause is not a throw — holding still before letting go is
+      // how a person says "put it down here". The scroll stream cannot show
+      // this (a hold produces no events, and the settle's own 140ms of quiet
+      // looks identical), so it is read from the release instead: if nothing
+      // has moved for longer than IDLE_MS while the pointer was still down,
+      // the stored velocity is stale and does not count. A touch pointer is
+      // cancelled before this runs, so on a phone the SLIDE_COMMIT_V floor is
+      // what keeps a slow drag from turning a page.
+      if (performance.now() - lastSampleTRef.current > IDLE_MS) lastVRef.current = 0;
+        scheduleSettle();
+      }
     },
-    [railSpringTick],
+    [railSpringTick, scheduleSettle],
   );
 
   // True when the just-finished gesture moved; click handlers ignore that click.
@@ -515,9 +744,26 @@ export default function useTimelineViewport({
     [setScrollTop],
   );
 
+
+  // Leave the menu for the timeline — what the start page's call to action
+  // does. It lands on the coarsest timeline band, the rung the gesture it names
+  // would have reached, rather than jumping the reader somewhere they did not
+  // ask to be.
+  const exitMenu = useCallback(() => {
+    if (bandIndexRef.current !== MENU_INDEX) return;
+    commitBand(TIMELINE_N - 1);
+  }, [commitBand]);
+
+  // Jump the strip to a slide (the menu's pager dots) — the same path a
+  // released swipe takes, so a tapped dot and a thrown page land identically.
+  const goToSlide = scrollToSlide;
+
   return {
-    band: MOBILE_BANDS[bandIndex],
+    band: MOBILE_ZOOM_BANDS[bandIndex],
     bandIndex,
+    menu,
+    goToSlide,
+    exitMenu,
     scrollY,
     maxScroll,
     layout,

@@ -46,6 +46,12 @@ export default function Header({
   onOpenAbout,
   onOpenTeams = null,
   teamsOpen = false,
+  // Hold the header open regardless of scrolling. Set while the menu-zoom rung
+  // owns the surface: there the scroller is paging between tutorial slides, not
+  // reading a timeline, and one of those slides draws an arrow to the team tab
+  // in this very header — hide-on-scroll would have taken the target away at
+  // exactly the moment it was being pointed at.
+  pinned = false,
 }) {
   const controls = useAnimation();
 
@@ -63,6 +69,15 @@ export default function Header({
   const visibleRef = useRef(true);
 
   useEffect(() => {
+    if (pinned) {
+      // Re-show if a previous scroll had tucked it away, then bind nothing.
+      if (!visibleRef.current) {
+        visibleRef.current = true;
+        controls.start({ height: HEADER_H, y: 0, transition: { duration: 0.2 } });
+      }
+      accumulatedDownRef.current = 0;
+      return;
+    }
     const el = scrollRef.current;
     if (!el) return;
 
@@ -97,7 +112,7 @@ export default function Header({
 
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollRef, controls]);
+  }, [scrollRef, controls, pinned]);
 
   // close the menu on Escape
   useEffect(() => {

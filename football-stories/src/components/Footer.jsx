@@ -1,13 +1,14 @@
-// Footer bar — two equal primary buttons that each open a drawer above the bar.
-//   Left:  ⚙️ Settings  -> display toggles (SettingsDrawer)
-//   Right: 👥 Personnel -> "Personnel Tracks": staff + player tenure bands
-//          on the timeline (RibbonControls).
-// Only one drawer is open at a time (they share the space above the bar).
-// Esc or tapping the active button closes it.
+// Footer bar — ONE primary button, opening a drawer above it:
+//   👥 Personnel -> "Personnel Tracks": staff + player tenure bands on the
+//      timeline (RibbonControls).
+// Esc or tapping the button closes it.
+//
+// It used to be two buttons, with ⚙️ Settings sharing the bar. The display
+// toggles now live on the MENU-ZOOM rung — the fully-zoomed-out start page
+// (src/menu/) — so the footer has a single job and does it full width.
 
 import { useEffect, useState } from "react";
 import RibbonControls from "./RibbonControls.jsx";
-import SettingsDrawer from "./SettingsDrawer.jsx";
 
 export const BAR_H = 44;
 const DRAWER_H = 300;
@@ -21,23 +22,18 @@ export default function Footer({
   ribbonConfig,
   onRibbonConfigChange,
   onFocusYear,
-  settings,
-  onSettingsChange,
 }) {
-  // null | "settings" | "personnel"
-  const [openDrawer, setOpenDrawer] = useState(null);
-  const open = openDrawer !== null;
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
-      if (e.key === "Escape") setOpenDrawer(null);
+      if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const toggle = (which) => setOpenDrawer((cur) => (cur === which ? null : which));
   const nPlayers = (ribbonConfig?.players || []).length;
 
   return (
@@ -66,10 +62,7 @@ export default function Footer({
           borderBottom: open ? "1px solid #e8eaef" : "none",
         }}
       >
-        {openDrawer === "settings" && (
-          <SettingsDrawer settings={settings} onChange={onSettingsChange} />
-        )}
-        {openDrawer === "personnel" && ribbonConfig && (
+        {open && ribbonConfig && (
           <RibbonControls
             teamId={teamId}
             draftSegment={draftSegment}
@@ -81,20 +74,13 @@ export default function Footer({
         )}
       </div>
 
-      {/* bar — only these two buttons, splitting the width evenly */}
+      {/* bar */}
       <div style={{ height: BAR_H, display: "flex", alignItems: "stretch" }}>
-        <DrawerButton
-          icon="⚙️"
-          label="Settings"
-          active={openDrawer === "settings"}
-          onClick={() => toggle("settings")}
-        />
-        <div style={{ width: 1, background: "#e2e4ea" }} />
         <DrawerButton
           icon="👥"
           label="Personnel"
-          active={openDrawer === "personnel"}
-          onClick={() => toggle("personnel")}
+          active={open}
+          onClick={() => setOpen((v) => !v)}
           badge={nPlayers > 0 ? nPlayers : null}
         />
       </div>

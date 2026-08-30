@@ -22,9 +22,15 @@ const DEFAULT_RIBBONS = { players: [] };
 
 function App() {
   const [selectedTeam, setSelectedTeam] = useState("ARI");
-  // Display toggles surfaced in the Settings drawer (footer). Missing key =>
-  // feature on, so an empty object means "everything shown" by default.
+  // Display toggles, surfaced on the menu-zoom rung (they used to live in a
+  // footer Settings drawer). Missing key => feature on, so an empty object
+  // means "everything shown" by default.
   const [settings, setSettings] = useState({});
+  // True while the fully-zoomed-out MENU rung owns the surface. The app opens
+  // there, hence the initial `true`. The shell needs to know because the tour
+  // draws arrows to the header — which would otherwise slide away the moment
+  // the reader swiped to the slide that points at it.
+  const [menuActive, setMenuActive] = useState(true);
   const [leagueOpen, setLeagueOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -239,6 +245,7 @@ function App() {
           onOpenMethodology={() => setMethodologyOpen(true)}
           onOpenAbout={() => setAboutOpen(true)}
           onSearchSelect={goTo}
+          pinned={menuActive}
         />
         <div style={{ width: '100%', flex: 1, height: '100%' }}>
           <Main
@@ -254,6 +261,11 @@ function App() {
             onFollow={goTo}
             onFocusEra={focusEra}
             focusedEraId={focusedEraId}
+            onSettingsChange={setSettings}
+            onOpenLeague={() => setLeagueOpen(true)}
+            onOpenMethodology={() => setMethodologyOpen(true)}
+            onOpenAbout={() => setAboutOpen(true)}
+            onMenuChange={setMenuActive}
           />
         </div>
         <Footer
@@ -265,8 +277,6 @@ function App() {
           // Switching a personnel track on scrolls the timeline to that
           // stint's first year — same deep-link path as the league view.
           onFocusYear={setFocusYear}
-          settings={settings}
-          onSettingsChange={setSettings}
         />
         {leagueOpen && (
           <LeagueView onClose={() => setLeagueOpen(false)} onGoTo={goTo} />

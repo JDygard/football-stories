@@ -10,7 +10,7 @@
 // animation that ends at opacity 0. Purely informational — no pointer events.
 
 import { useEffect, useRef } from "react";
-import { ZOOM_LEVELS, zoomLabelFor } from "./visualization/detail.js";
+import { ZOOM_LEVELS, isMenuBand, zoomLabelFor } from "./visualization/detail.js";
 
 const FOOTER_BAR_H = 44; // keep in sync with Footer's BAR_H
 
@@ -53,6 +53,10 @@ export default function ZoomHud({ band }) {
     firstRef.current = false;
   }, []);
   if (firstRef.current) return null;
+  // The menu rung is not a level of detail and captioning it would only put a
+  // dark band across the start page's own gesture hint, which says the same
+  // thing better.
+  if (isMenuBand(band)) return null;
 
   return (
     <div

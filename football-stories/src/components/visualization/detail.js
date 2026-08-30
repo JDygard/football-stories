@@ -46,7 +46,37 @@ export const DEFAULT_BAND = "GAME_DETAIL";
 // returns it and the rank/hysteresis helpers are defined over the full list.
 export const MOBILE_BANDS = DETAIL_BANDS.filter((b) => b !== "FRANCHISE_OVERVIEW");
 
+// ---- the MENU rung -------------------------------------------------------
+//
+// One stop further out than Eras there is no franchise left to draw, and the
+// surface becomes the app's own start page and onboarding tour (src/menu/).
+// It is a ZOOM RUNG, not a mode: the app opens on it, and you leave it by
+// pinching or scrolling in like at any other level — which is what makes
+// "pinch out to skip the tour" a plain statement of the zoom model rather than
+// a special case bolted onto it.
+//
+// It deliberately stays OUT of DETAIL_BANDS and DETAIL_GEOMETRY: nothing about
+// it is a way of drawing seasons, and every builder that walks the band list
+// would otherwise lay a whole franchise out for it. The zoom LADDERS append it
+// instead (MOBILE_ZOOM_BANDS here, DESKTOP_ZOOM_BANDS in desktopDetail.js) and
+// the three lookups below special-case it — because their shared fallback is
+// DEFAULT_BAND, which would have claimed the menu was the MOST detailed band
+// in the app and rendered every module onto it.
+export const MENU_BAND = "MENU";
+
+export const isMenuBand = (band) => band === MENU_BAND;
+
+// The mobile zoom ladder: the four timeline bands, then the menu.
+export const MOBILE_ZOOM_BANDS = [...MOBILE_BANDS, MENU_BAND];
+
+// Nothing renders at the menu rung. `offseason: "hidden"` is the answer the
+// consumers that ask about its geometry already understand (Main resets any
+// expanded draft class when offseasons stop being shown).
+const MENU_GEOMETRY = { season: { mode: "line", height: 0 }, offseason: "hidden" };
+
 // Total user-facing zoom rungs (1 = most years on screen … 4 = every game).
+// The menu is NOT one of them: it is where the ladder starts rather than a
+// level of detail, and the HUD doesn't caption it (see ZoomHud).
 export const ZOOM_LEVELS = 4;
 
 // User-facing label for each internal band: the "Zoom N" rung (per the
@@ -59,11 +89,17 @@ export const ZOOM_LABELS = {
   SEASON_LINES: { zoom: 2, name: "Seasons" },
   ERA_SUMMARY: { zoom: 1, name: "Eras" },
   FRANCHISE_OVERVIEW: { zoom: 1, name: "Eras" },
+  // zoom 0 = off the rung ladder entirely; LevelBars lights nothing for it and
+  // the HUD suppresses the caption anyway.
+  [MENU_BAND]: { zoom: 0, name: "Menu" },
 };
 
 export const zoomLabelFor = (band) => ZOOM_LABELS[band] || ZOOM_LABELS[DEFAULT_BAND];
 
 export const bandRank = (band) => {
+  // The menu sits one past the least detailed band, so `bandAtLeast` says no to
+  // every module there without any of them having to know it exists.
+  if (band === MENU_BAND) return DETAIL_BANDS.length;
   const i = DETAIL_BANDS.indexOf(band);
   return i === -1 ? 0 : i;
 };
@@ -74,7 +110,9 @@ export const bandAtLeast = (band, minBand) =>
   bandRank(band) <= bandRank(minBand || DEFAULT_BAND);
 
 export const geometryFor = (band) =>
-  DETAIL_GEOMETRY[band] || DETAIL_GEOMETRY[DEFAULT_BAND];
+  band === MENU_BAND
+    ? MENU_GEOMETRY
+    : DETAIL_GEOMETRY[band] || DETAIL_GEOMETRY[DEFAULT_BAND];
 
 // Resolve a continuous zoom position (`zoomF`, a float index into DETAIL_BANDS
 // where 0 = most detailed) to a committed band index, with hysteresis so

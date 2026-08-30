@@ -20,6 +20,15 @@ import {
   ERA_HEADER_H,
   ERA_HEADER_COMPACT_H,
 } from "../src/desktop/desktopEraModel.js";
+// The desktop timeline's COAST. The gesture measurement and the page-turn rule
+// it is built on are shared with the phone and live in menu/menuModel.js — see
+// sims/menu_zoom.sim.mjs, which owns those assertions. Imported through
+// flingModel here on purpose: this asserts the desktop-facing surface really
+// does re-export them.
+import {
+  FLING_STOP_V, FLING_TAU, IDLE_MS, MAX_SAMPLES, MIN_FLING_V, SLIDE_COMMIT_V,
+  flingDistance, flingStep, slideTargetFor, trackSample, velocityOf,
+} from "../src/desktop/flingModel.js";
 import {
   buildEraBoxes, eraYearsLabel, eraRecordLabel, estimateTextWidth,
   ERA_LABEL_FS, ERA_YEARS_FS, ERA_TEXT_INSET, ERA_LABEL_BASELINE,
@@ -32,6 +41,7 @@ let failures = 0;
 const ok = (cond, msg) => {
   if (!cond) { failures++; console.log("FAIL:", msg); }
 };
+const near = (a, b, eps = 0.51) => Math.abs(a - b) <= eps;
 
 // ---- synthetic data ----
 const seasons = [];
@@ -584,6 +594,97 @@ for (let from = 0; from <= LAST; from++) {
       `rung ${from} -> ${to} reachable (got ${pickBand(widths[to], from, widths)})`);
   }
 }
+
+// ---- drag momentum -------------------------------------------------------
+// Desktop's lateral navigation is a mouse drag, which the browser gives no
+// inertia of its own (the scroller is moved by assigning scrollLeft), so the
+// physics AND the read of the gesture's intent are ours. Both are pure.
+
+// A steady drag reports its real speed, in scroll-offset space.
+{
+  const s = [];
+  for (let t = 0; t <= 80; t += 16) trackSample(s, t * 2, t); // 2 px/ms
+  ok(near(velocityOf(s, 80), 2, 0.02), `steady drag measures 2 px/ms (got ${velocityOf(s, 80)})`);
+  ok(velocityOf(s, 80) > 0, "moving toward later content reads positive");
+}
+{
+  const s = [];
+  for (let t = 0; t <= 80; t += 16) trackSample(s, 1000 - t * 2, t);
+  ok(near(velocityOf(s, 80), -2, 0.02), "dragging back reads negative");
+}
+// A single sample is not a velocity, and neither is a repeated position.
+ok(velocityOf([], 0) === 0, "no samples -> no velocity");
+ok(velocityOf([{ pos: 5, t: 3 }], 3) === 0, "one sample -> no velocity");
+{
+  const s = [];
+  for (let t = 0; t <= 80; t += 16) trackSample(s, 500, t);
+  ok(velocityOf(s, 80) === 0, "a held-still pointer has no velocity");
+}
+// THE PAUSE RULE: a fast drag that stopped before release is a person putting
+// the view down, not throwing it. Same samples, later release.
+{
+  const s = [];
+  for (let t = 0; t <= 80; t += 16) trackSample(s, t * 3, t);
+  ok(velocityOf(s, 80) > 2, "released immediately -> a throw");
+  ok(velocityOf(s, 80 + IDLE_MS + 50) === 0, "released after a pause -> not a throw");
+}
+// The window keeps the buffer bounded and only looks at the recent past: an
+// early crawl must not drag a late flick's measured speed down.
+{
+  const s = [];
+  for (let t = 0; t <= 600; t += 16) trackSample(s, t <= 500 ? t * 0.05 : 25 + (t - 500) * 3, t);
+  ok(s.length <= MAX_SAMPLES, `sample buffer stays bounded (${s.length})`);
+  ok(velocityOf(s, 600) > 2.5, `a late flick is measured on its own terms (got ${velocityOf(s, 600)})`);
+}
+
+// Friction: monotone decay to a stop, and a closed-form distance that matches
+// what stepping actually covers (slideTargetFor trusts the closed form).
+{
+  const v0 = 2;
+  ok(near(flingDistance(v0), v0 * FLING_TAU, 0.001), "distance = v0 * tau");
+  let v = v0, travelled = 0, t = 0;
+  while (Math.abs(v) >= FLING_STOP_V && t < 20000) { travelled += v * 16; v = flingStep(v, 16); t += 16; }
+  ok(t < 20000, "a fling terminates");
+  ok(near(travelled, flingDistance(v0), flingDistance(v0) * 0.03),
+     `stepping covers the predicted distance (${Math.round(travelled)} vs ${Math.round(flingDistance(v0))})`);
+  ok(flingStep(v0, 100) < v0 && flingStep(v0, 100) > 0, "friction decays without reversing");
+  ok(flingStep(-v0, 100) > -v0 && flingStep(-v0, 100) < 0, "and does the same backwards");
+  ok(flingStep(v0, 0) === v0, "no time passing, no decay");
+}
+
+// THE INTENT RULE, which is the whole point: a short confident flick turns the
+// page even though it never travelled half of one.
+{
+  const span = 1440;
+  const nudge = { scroll: span * 0.18, span, startSlide: 0, count: 2 };
+  ok(slideTargetFor({ ...nudge, velocity: 0 }) === 0,
+     "a fifth of a page with no speed settles back");
+  ok(slideTargetFor({ ...nudge, velocity: SLIDE_COMMIT_V * 1.2 }) === 1,
+     "the same distance, thrown, turns the page");
+  ok(slideTargetFor({ ...nudge, velocity: SLIDE_COMMIT_V * 0.5 }) === 0,
+     "a half-hearted push does not — that is the unintended-gesture guard");
+  // Dragged most of the way and released dead: distance still decides.
+  ok(slideTargetFor({ scroll: span * 0.7, span, startSlide: 0, velocity: 0, count: 2 }) === 1,
+     "past halfway with no speed still commits");
+  ok(slideTargetFor({ scroll: span * 0.45, span, startSlide: 0, velocity: 0, count: 2 }) === 0,
+     "short of halfway with no speed does not");
+  // A flick back, from the far page.
+  ok(slideTargetFor({ scroll: span * 0.85, span, startSlide: 1, velocity: -SLIDE_COMMIT_V * 1.2, count: 2 }) === 0,
+     "a flick backwards turns back a page");
+  // AT LEAST one page, never exactly one: a long fast drag keeps what it earned.
+  ok(slideTargetFor({ scroll: span * 2.4, span, startSlide: 0, velocity: SLIDE_COMMIT_V * 1.2, count: 5 }) >= 2,
+     "a long, fast drag is not clamped back to a single page");
+  // Never off the ends, however hard it is thrown.
+  ok(slideTargetFor({ scroll: span * 1.9, span, startSlide: 1, velocity: 40, count: 2 }) === 1,
+     "a throw past the last page clamps");
+  ok(slideTargetFor({ scroll: 0, span, startSlide: 0, velocity: -40, count: 2 }) === 0,
+     "a throw past the first page clamps");
+  ok(slideTargetFor({ scroll: 0, span: 0, startSlide: 0, velocity: 0, count: 2 }) === 0,
+     "a zero-width pane does not divide by zero");
+}
+// The two thresholds are ordered: coasting the timeline is cheap, committing to
+// a different page is a decision.
+ok(SLIDE_COMMIT_V > MIN_FLING_V, "a page turn needs more intent than a coast");
 
 console.log(failures ? `\n${failures} FAILURES` : "\nALL SIMS PASS");
 process.exit(failures ? 1 : 0);

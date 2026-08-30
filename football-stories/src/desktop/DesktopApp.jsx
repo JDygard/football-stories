@@ -10,9 +10,11 @@
 // (see desktop.css) — here the frame IS the whole window instead of a phone
 // letterbox.
 //
-// No footer/drawers on desktop: Settings and Personnel Tracks (the mobile
-// drawers' content components, reused unchanged) live in a PERSISTENT CONTROL
-// DOCK — always open, fixed height, no toggling.
+// No footer/drawers on desktop: Personnel Tracks (the mobile drawer's content
+// component, reused unchanged) lives in a PERSISTENT CONTROL DOCK — always
+// open, fixed height, no toggling. Settings used to share that dock; the
+// display toggles now live on the MENU-ZOOM rung (src/menu/), the fully
+// zoomed-out start page, so the dock is personnel and nothing else.
 //
 // The dock runs along the BOTTOM of the window rather than down one side. Width
 // is the axis the timeline is built on (time flows left→right), so a side rail
@@ -28,7 +30,6 @@ import './desktop.css'
 import '../App.css'
 import Header from '../components/header/Header.jsx'
 import DesktopMain from './DesktopMain.jsx'
-import SettingsDrawer from '../components/SettingsDrawer.jsx'
 import RibbonControls from '../components/RibbonControls.jsx'
 import LeagueView from '../components/LeagueView.jsx'
 import MethodologyView from '../components/MethodologyView.jsx'
@@ -50,7 +51,6 @@ import { FRAME_ID } from '../utils/frameRect'
 // list of everyone who ever played for the franchise. At 196px that list showed
 // about three rows at a time and you scrolled for everything.
 const DOCK_H = 344
-const DOCK_SETTINGS_W = 360 // the toggle rows read comfortably at this width
 
 // SWEEP — following a career link moves the whole timeline AWAY from where the
 // destination lies, then brings that team in from the side it sits on. The
@@ -113,7 +113,7 @@ const DEFAULT_RIBBONS = { players: [] };
 
 function DesktopApp() {
   const [selectedTeam, setSelectedTeam] = useState("ARI");
-  // Display toggles surfaced in the Settings drawer. Missing key => on.
+  // Display toggles, surfaced on the menu-zoom rung. Missing key => on.
   const [settings, setSettings] = useState({});
   const [leagueOpen, setLeagueOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
@@ -438,11 +438,15 @@ function DesktopApp() {
               onFollow={goTo}
               onFocusEra={focusEra}
               focusedEraId={focusedEraId}
+              onSettingsChange={setSettings}
+              onOpenLeague={() => setLeagueOpen(true)}
+              onOpenMethodology={() => setMethodologyOpen(true)}
+              onOpenAbout={() => setAboutOpen(true)}
             />
           )}
         </div>
-        {/* Persistent control dock along the bottom: Settings left, Personnel
-            Tracks right. Always open, fixed height. */}
+        {/* Persistent control dock along the bottom: Personnel Tracks, full
+            width. Always open, fixed height. */}
         <aside
           style={{
             height: DOCK_H,
@@ -453,22 +457,6 @@ function DesktopApp() {
             minHeight: 0,
           }}
         >
-          <section
-            style={{
-              width: DOCK_SETTINGS_W,
-              flexShrink: 0,
-              borderRight: '1px solid #e4e7ee',
-              background: '#fff',
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0,
-            }}
-          >
-            <PanelHeading icon="⚙️" label="SETTINGS" />
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <SettingsDrawer desktop settings={settings} onChange={setSettings} />
-            </div>
-          </section>
           <section
             style={{
               flex: 1,

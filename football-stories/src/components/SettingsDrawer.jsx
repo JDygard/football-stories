@@ -1,5 +1,6 @@
-// Settings drawer — lives inside the footer, opened by the left "Settings"
-// button. Holds optional display toggles for the timeline. Each feature is on
+// The display toggles for the timeline. Named for the footer drawer it used to
+// live in; that drawer is gone and this is now rendered on the MENU-ZOOM rung
+// (src/menu/), which is its only consumer. Each feature is on
 // unless its key is explicitly false, so an empty settings object shows
 // everything (see App's DEFAULT settings note).
 
@@ -79,7 +80,12 @@ function Toggle({ on, onClick }) {
   );
 }
 
-export default function SettingsDrawer({ settings = {}, onChange, desktop = false }) {
+// `scroll` false renders the rows at their natural height with no scroller of
+// its own. That is not cosmetic: on the menu-zoom rung this list covers most of
+// a phone slide, and a nested scroll container SWALLOWS THE SWIPE — the gesture
+// goes to the list (which may have nothing to scroll) and never reaches the
+// slide strip underneath. The rung sizes itself so every row fits instead.
+export default function SettingsDrawer({ settings = {}, onChange, desktop = false, scroll = true }) {
   const features = desktop ? FEATURES : FEATURES.filter((f) => !f.desktopOnly);
   // absent => the feature's default (most on; the adjusted-grade lens off).
   const isOn = (key, defaultOn = true) =>
@@ -89,7 +95,13 @@ export default function SettingsDrawer({ settings = {}, onChange, desktop = fals
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12.5 }}>
-      <div style={{ overflowY: "auto", flex: 1, padding: "6px 8px 10px" }}>
+      <div
+        style={{
+          overflowY: scroll ? "auto" : "visible",
+          flex: scroll ? 1 : "0 0 auto",
+          padding: "6px 8px 10px",
+        }}
+      >
         {features.map((f) => {
           const on = isOn(f.key, f.defaultOn ?? true);
           return (

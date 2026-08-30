@@ -65,7 +65,7 @@ import {
   eraZoneFor,
 } from "./desktopEraModel.js";
 import {
-  buildSuperBowlCrowns, crownedYears, medalFrameWidth, CROWN_ZONE,
+  buildCrowns, crownedYears, medalFrameWidth, CROWN_ZONE,
 } from "./desktopCrownModel.js";
 import DesktopCrownLayer from "./DesktopCrownLayer.jsx";
 
@@ -376,9 +376,12 @@ const SeasonBlock = memo(function SeasonBlock({
   const barH = Math.min(laneH / 2, Math.abs(diff) * unit);
   const y0 = diff >= 0 ? midY - barH : midY;
   const color = diff >= 0 ? WIN : LOSS;
-  // A crowned season (a Super Bowl at a line-mode zoom) does NOT draw its frame
-  // here: the crown draws the same frame taller, breaking up out of the lane,
-  // and two frames on one column would double-stroke it.
+  // A crowned season — one whose crown RISES, so a Super Bowl or a conference
+  // title at a line-mode zoom — does NOT draw its frame here: the crown draws
+  // the same frame taller, breaking up out of the lane, and two frames on one
+  // column would double-stroke it. A division cap does not rise and this frame
+  // stays, which is the point: the cap says what was won, the frame says how
+  // far the season went afterwards.
   const medal = showPlayoffs && !crowned ? playoffMedal(raw.playoffs) : null;
   // Both scale WITH the column instead of sitting at a fixed few px: season
   // columns are no longer one width (Eras fits itself to the viewport, Seasons
@@ -710,14 +713,21 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   // …and whether the chapter gets its box, or only its wall label.
   const eraFramed = ERA_FRAME_BANDS.has(band);
 
-  // Super Bowl crowns. Built off the FULL block list, not `visible`, so a
-  // merged run keeps its shape while it scrolls in from off-screen — deciding
-  // that two titles are back-to-back must not depend on which of them the
-  // viewport currently holds.
+  // Crowns — Super Bowl, conference, division. Built off the FULL block list,
+  // not `visible`, so a merged run keeps its shape while it scrolls in from
+  // off-screen: deciding that two wins are back-to-back must not depend on
+  // which of them the viewport currently holds.
   const crowns = useMemo(
     () =>
       CROWN_BANDS.has(band)
-        ? buildSuperBowlCrowns({ blocks: layout?.blocks, showPlayoffs })
+        ? buildCrowns({
+            blocks: layout?.blocks,
+            showPlayoffs,
+            // A rising crown redraws the season's own frame, taller. Handing it
+            // the same medal lookup SeasonBlock uses is what stops the two
+            // disagreeing about a color.
+            medalFor: (season) => playoffMedal(season?.playoffs),
+          })
         : [],
     [band, layout, showPlayoffs],
   );

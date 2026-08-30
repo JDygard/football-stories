@@ -11,6 +11,7 @@ import {
 import TeamTimelineLayer from "./visualization/TeamTimelineLayer.jsx";
 import InfoCard from "./InfoCard.jsx";
 import ZoomHud from "./ZoomHud.jsx";
+import MenuZoom from "../menu/MenuZoom.jsx";
 import useTimelineViewport from "../hooks/useTimelineViewport.js";
 import { getEnabledModules, buildModuleData } from "./visualization/offseason/registry.js";
 import { geometryFor } from "./visualization/detail.js";
@@ -37,6 +38,16 @@ const Main = forwardRef(function Main(
     // ribbonConfig. Main only reserves the room and routes the tap.
     onFocusEra,
     focusedEraId = null,
+    // The Settings toggles and the way into the other views live on the
+    // menu-zoom rung now (the footer's Settings drawer is gone), so the pane
+    // that renders that rung needs the shell's handlers.
+    onSettingsChange,
+    onOpenLeague,
+    onOpenMethodology,
+    onOpenAbout,
+    // Told when the fully-zoomed-out menu takes the surface, so the shell can
+    // hold the header still while the tour points at it.
+    onMenuChange,
   },
   externalRef,
 ) {
@@ -182,9 +193,13 @@ const Main = forwardRef(function Main(
   });
   const {
     layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY,
-    railPan, scrollRef, scrollRange,
+    railPan, scrollRef, scrollRange, menu, goToSlide, exitMenu,
   } = viewport;
   didDragRef.current = didDrag;
+
+  useEffect(() => {
+    if (onMenuChange) onMenuChange(menu);
+  }, [menu, onMenuChange]);
 
   // Expose the native scroll container (Header reads its scrollTop to hide/show).
   useImperativeHandle(externalRef, () => scrollRef.current, [scrollRef]);
@@ -259,7 +274,26 @@ const Main = forwardRef(function Main(
         {/* Spacer giving the native scroll range = committed band height plus
             the ribbon-stack slack the timeline is pushed down by. */}
         <div style={{ height: Math.max(scrollRange, height), position: "relative" }}>
-          {ready && (
+          {/* The menu rung renders INSIDE this scroller rather than replacing
+              it: the zoom listeners are bound once to the container above, so
+              unmounting it would take the way back out of the menu with it. */}
+          {menu && ready && (
+            <MenuZoom
+              axis="y"
+              width={width}
+              height={height}
+              offset={scrollY}
+              settings={settings}
+              onSettingsChange={onSettingsChange}
+              onOpenLeague={onOpenLeague}
+              onOpenMethodology={onOpenMethodology}
+              onOpenAbout={onOpenAbout}
+              onGoToSlide={goToSlide}
+              onStart={exitMenu}
+              visualScale={visualScale}
+            />
+          )}
+          {!menu && ready && (
             <svg
               width={width}
               height={height}

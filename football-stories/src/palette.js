@@ -124,6 +124,40 @@ export const MEDAL_SB_DARK = "#7d6115"; // plaque border + stem
 export const MEDAL_SB_INK = "#3a2c05"; // "SB" on the plaque (12.5:1 on the gold)
 export const MEDAL_SB_WASH = "rgba(212,175,55,0.13)"; // the lit column behind it
 
+// THE OTHER TWO CAPS. A conference title and a division title get their own
+// plaques above the lane (see desktopCrownModel's CROWN_TIERS), and the metals
+// are chosen to agree with the MEDALS table below rather than to be pretty:
+//
+//   CONF is the SAME silver MEDALS gives "lost the big one", because winning
+//   the conference and losing the Super Bowl are the same season. Cap and
+//   frame therefore cannot disagree, exactly as with the gold.
+//
+//   DIV is copper, and it is the one that has NO counterpart in MEDALS —
+//   winning a division is read off `division_finish`, not off the playoff
+//   result, so a division winner's frame stays whatever its playoff exit
+//   earned. The cap is the only copper on the timeline; that is why it does
+//   not need to match anything.
+export const MEDAL_CONF = "#b9bec7";
+export const MEDAL_CONF_DARK = "#5d6470";
+export const MEDAL_CONF_INK = "#232830"; // 7.9:1 on the silver
+export const MEDAL_CONF_WASH = "rgba(185,190,199,0.15)";
+
+//   The copper is PALE. A true copper — the one an eye reaches for — sits
+//   within dE2000 5 of that bronze, and a division winner very often wears
+//   exactly that frame, so the cap would have been the same color as the
+//   outline directly under it. Going dark solved that and broke something
+//   else: a dark plate with white text is not the same OBJECT as the gold and
+//   silver caps, which are light metal with dark engraving. This one keeps the
+//   style and buys its separation with lightness instead — dE 15 from the
+//   bronze, and it still takes dark ink at 7.8:1.
+export const MEDAL_DIV = "#e8b088";
+export const MEDAL_DIV_DARK = "#8a5a2e";
+export const MEDAL_DIV_INK = "#40260c"; // 7.2:1 on the copper
+// Unused today — copper is a cap and never takes a frame, so nothing washes a
+// column with it. Kept so the tier's paint entry has the same shape as the
+// other two (see TIER_PAINT in DesktopCrownLayer).
+export const MEDAL_DIV_WASH = "rgba(232,176,136,0.16)";
+
 // Ordered; first regex to match wins. Gold / silver / steel / bronze / black.
 // NOTE the gold row also matches "won champ", so a pre-merger NFL Championship
 // earns the gold frame. That is deliberate, and it is exactly why the crown has

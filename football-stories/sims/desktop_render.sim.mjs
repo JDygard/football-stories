@@ -28,7 +28,7 @@ import {
   ERA_RECORD_FS,
 } from "../src/desktop/desktopEraModel.js";
 import { CROWN_H } from "../src/desktop/desktopCrownModel.js";
-import { MEDAL_SB } from "../src/palette.js";
+import { MEDAL_SB, MEDAL_DIV } from "../src/palette.js";
 
 let failures = 0;
 const ok = (cond, msg) => { if (!cond) { failures++; console.log("FAIL:", msg); } };
@@ -146,10 +146,11 @@ for (const band of DESKTOP_BANDS) {
   const negSize = [...markup.matchAll(/\b(?:width|height)="(-[\d.]+)"/g)];
   ok(negSize.length === 0, `${band}: no negative rect sizes (${negSize.slice(0, 3).map((m) => m[0]).join(" ")})`);
 
-  // ---- SUPER BOWL CROWNS -------------------------------------------------
+  // ---- CROWNS ------------------------------------------------------------
   // The synthetic franchise wins a title every even year, so every line-mode
   // band renders a whole run of them and the alternating (non-merging) case is
-  // exercised by construction.
+  // exercised by construction. Every third year finishes first in its division,
+  // so the copper cap-only tier is exercised too.
   const geomForCrown = desktopGeometryFor(band);
   // Built from the constants, not hardcoded, so retuning the plaque can't
   // silently turn these assertions into no-ops.
@@ -178,6 +179,23 @@ for (const band of DESKTOP_BANDS) {
       `${band}: expected one gold frame per crown, got ${goldFrames.length}`
       + ` frames for ${plaques.length} plaques — a crowned season is drawing`
       + ` its own medal frame as well as the crown's`);
+
+    // THE COPPER TIER IS A CAP, NOT A FRAME. A division title is read off
+    // `division_finish` while the frame's color says how far the season went in
+    // the playoffs — two different facts — so copper must never take a frame
+    // over. Its plaques render; its 2.5px frame stroke must not exist at all.
+    const copperPlaques = [...markup.matchAll(
+      new RegExp(`<rect x="[\\d.]+" y="[\\d.]+" width="[\\d.]+" height="[\\d.]+" rx="4" fill="${MEDAL_DIV}"`, "g"),
+    )];
+    ok(copperPlaques.length > 0, `${band}: division caps render`);
+    ok(markup.includes(">DIV<") || /DIV ×\d/.test(markup),
+      `${band}: a division cap carries its "DIV" label`);
+    const copperFrames = [...markup.matchAll(
+      new RegExp(`stroke="${MEDAL_DIV}" stroke-width="2.5"`, "g"),
+    )];
+    ok(copperFrames.length === 0,
+      `${band}: a division cap drew ${copperFrames.length} rising frames — copper`
+      + ` must leave the season's own playoff-exit frame alone`);
 
     // The crown must clear the era header's record line. This is the whole
     // premise of borrowing the header's air rather than buying a new row.

@@ -23,6 +23,8 @@
 
 import {
   RESULT, TREND, ROLE_COLORS, TIER_COLORS, onColor, INK, PAPER,
+  MEDALS, MEDAL_SB, MEDAL_SB_INK, MEDAL_CONF, MEDAL_CONF_INK,
+  MEDAL_DIV, MEDAL_DIV_INK,
 } from "../src/palette.js";
 
 let failures = 0;
@@ -242,6 +244,51 @@ ok(
   de2000(TIER_COLORS.S, RESULT.WIN) < 40 && de2000(TIER_COLORS.F, RESULT.LOSS) < 40,
   "the grade ramp is supposed to share the result language — check TIER_COLORS",
 );
+
+// ---------------------------------------------------------------------------
+// THE CROWN METALS
+// ---------------------------------------------------------------------------
+// Three caps hang above the lane — gold SB, silver CONF, copper DIV — and each
+// one sits inches from a FRAME whose color means something else. Two of the
+// three are meant to match their frame exactly (a Super Bowl win is gold in
+// both places, a conference win is the same silver MEDALS gives "lost the big
+// one"), and the third must NOT be confusable with the bronze that means "lost
+// in the divisional round" — which is the nearest color on the timeline to it
+// and the easiest thing in this palette to misread.
+{
+  const medalOf = (finish) => MEDALS.find(([re]) => re.test(finish))?.[1];
+  ok(MEDAL_SB === medalOf("Won SB"), "the gold cap and a title's frame must be one value");
+  ok(MEDAL_CONF === medalOf("Lost SB"),
+     "the silver cap and the frame of the season it describes must be one value —"
+     + " winning the conference and losing the Super Bowl are the same season");
+
+  const metals = [["SB", MEDAL_SB], ["CONF", MEDAL_CONF], ["DIV", MEDAL_DIV]];
+  for (let i = 0; i < metals.length; i++) {
+    for (let j = i + 1; j < metals.length; j++) {
+      const d = de2000(metals[i][1], metals[j][1]);
+      ok(d >= 14, `${metals[i][0]} and ${metals[j][0]} caps are only dE ${d.toFixed(1)} apart`
+        + " — the three tiers have to be told apart at a glance, at 16px wide");
+    }
+  }
+  // The one that has no frame to agree with, against the frame it will sit on.
+  const bronze = medalOf("Lost Div");
+  const dDiv = de2000(MEDAL_DIV, bronze);
+  ok(dDiv >= 14,
+    `the copper DIV cap is only dE ${dDiv.toFixed(1)} from the bronze that means`
+    + " \"lost in the divisional round\" — a division winner often wears exactly"
+    + " that frame, so the cap and the frame under it would read as one mark");
+  console.log(`   crown metals: DIV vs divisional-round bronze dE ${dDiv.toFixed(1)}`);
+
+  // Ink legibility on each cap.
+  for (const [name, bg, ink] of [
+    ["SB", MEDAL_SB, MEDAL_SB_INK],
+    ["CONF", MEDAL_CONF, MEDAL_CONF_INK],
+    ["DIV", MEDAL_DIV, MEDAL_DIV_INK],
+  ]) {
+    const c = contrast(ink, bg);
+    ok(c >= 4.5, `${name} cap label is ${c.toFixed(2)}:1 on its metal — needs 4.5:1`);
+  }
+}
 
 console.log(failures ? `\n${failures} FAILURES` : "\nALL SIMS PASS");
 process.exit(failures ? 1 : 0);

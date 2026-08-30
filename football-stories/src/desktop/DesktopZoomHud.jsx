@@ -7,7 +7,7 @@
 // duplicate coarse band), so LevelBars maps one bar per rung with none doubled.
 
 import { useEffect, useRef } from "react";
-import { ZOOM_LEVELS, zoomLabelFor } from "./desktopDetail.js";
+import { ZOOM_LEVELS, isMenuBand, zoomLabelFor } from "./desktopDetail.js";
 
 function LevelBars({ zoom }) {
   const levels = Array.from({ length: ZOOM_LEVELS }, (_, i) => ZOOM_LEVELS - i);
@@ -44,6 +44,8 @@ export default function DesktopZoomHud({ band }) {
     firstRef.current = false;
   }, []);
   if (firstRef.current) return null;
+  // The menu rung is not a level of detail — see the mobile HUD.
+  if (isMenuBand(band)) return null;
 
   return (
     <div

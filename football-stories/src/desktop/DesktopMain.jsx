@@ -22,6 +22,7 @@ import {
 import DesktopTimelineLayer from "./DesktopTimelineLayer.jsx";
 import InfoCard from "../components/InfoCard.jsx";
 import DesktopZoomHud from "./DesktopZoomHud.jsx";
+import MenuZoom from "../menu/MenuZoom.jsx";
 import useDesktopViewport from "./useDesktopViewport.js";
 import { getEnabledDesktopModules, buildModuleData } from "./registry.js";
 import { desktopGeometryFor } from "./desktopDetail.js";
@@ -40,6 +41,13 @@ const DesktopMain = forwardRef(function DesktopMain(
     onFollow,
     onFocusEra,
     focusedEraId = null,
+    // The Settings toggles and the way into the other views live on the
+    // menu-zoom rung now (the dock's Settings panel is gone), so the pane that
+    // renders that rung needs the shell's handlers.
+    onSettingsChange,
+    onOpenLeague,
+    onOpenMethodology,
+    onOpenAbout,
   },
   externalRef,
 ) {
@@ -192,7 +200,7 @@ const DesktopMain = forwardRef(function DesktopMain(
   });
   const {
     layout, scrollX, band, handlers, didDrag, visualScale, scaleAnchorX,
-    scrollRef, totalWidth,
+    scrollRef, totalWidth, menu, goToSlide, exitMenu,
   } = viewport;
 
   // Clicking an era plaque tells the shell to highlight who made that chapter.
@@ -346,7 +354,26 @@ const DesktopMain = forwardRef(function DesktopMain(
       >
         {/* Spacer giving the native scroll range = committed band width. */}
         <div style={{ width: Math.max(totalWidth, width), height: "100%", position: "relative" }}>
-          {ready && (
+          {/* The menu rung renders INSIDE this scroller rather than replacing
+              it: the zoom listeners are bound once to the container above, so
+              unmounting it would take the way back out of the menu with it. */}
+          {menu && ready && (
+            <MenuZoom
+              axis="x"
+              width={width}
+              height={height}
+              offset={scrollX}
+              settings={settings}
+              onSettingsChange={onSettingsChange}
+              onOpenLeague={onOpenLeague}
+              onOpenMethodology={onOpenMethodology}
+              onOpenAbout={onOpenAbout}
+              onGoToSlide={goToSlide}
+              onStart={exitMenu}
+              visualScale={visualScale}
+            />
+          )}
+          {!menu && ready && (
             <svg
               width={width}
               height={height}

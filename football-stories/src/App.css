@@ -103,3 +103,50 @@
     animation-name: zoomHudFade;
   }
 }
+
+/* --- Menu-zoom -------------------------------------------------------------
+   The start page's gesture tease. The glyph nudges along the axis the slides
+   actually move on, which is the whole content of the hint: a phone scrolls
+   down, a landscape window swipes across. Reduced motion drops the nudge and
+   leaves the arrow — the direction is the message, not the movement. */
+@keyframes menuHintY {
+  0%, 100% { transform: translateY(0); opacity: 0.75; }
+  50% { transform: translateY(5px); opacity: 1; }
+}
+@keyframes menuHintX {
+  0%, 100% { transform: translateX(0); opacity: 0.75; }
+  50% { transform: translateX(5px); opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .menu-hint-y { animation: menuHintY 1.6s ease-in-out infinite; }
+  .menu-hint-x { animation: menuHintX 1.6s ease-in-out infinite; }
+}
+
+/* Tour callouts: they point at live chrome outside the pane, so they can't
+   scroll in with their slide — they fade in where they stand instead. */
+@keyframes menuCalloutIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .menu-callout { animation: menuCalloutIn 260ms ease-out both; }
+}
+
+/* App.css sets `overscroll-behavior: none` on every element (pull-to-refresh,
+   page bounce). Chromium stops a scroll chain at ANY scroll container whose
+   overscroll-behavior is none — including one with nothing to scroll, and
+   including one that is only a scroll container because it says
+   `overflow: hidden`. On the menu-zoom slides that silently ate swipes: first
+   the display-toggle list, then the hero's own clipping box. Since a slide is
+   made of boxes and any of them can acquire an overflow, the exemption covers
+   the whole slide rather than being chased one element at a time. */
+.menu-slide,
+.menu-slide * {
+  overscroll-behavior: auto;
+}
+
+/* Menu-zoom call to action + the tour rail. Both are real buttons, so they get
+   the hover response that says so. */
+.menu-cta:hover { filter: brightness(1.07); }
+.menu-cta:active { filter: brightness(0.96); }
+.menu-tour-rail:hover { background: rgba(15, 32, 54, 0.075) !important; }
