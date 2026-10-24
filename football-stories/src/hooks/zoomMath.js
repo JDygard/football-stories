@@ -70,3 +70,27 @@ export function expSmooth(cur, target, dtMs, tau = 55) {
 export function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
+
+// Where a RELEASED pinch should settle. Left to pickBand alone, a pinch only
+// changes level once the fingers have travelled past the geometric midpoint
+// between two bands plus the hysteresis — and neighbouring bands can be 3x
+// apart (menu -> Eras on a phone), so a first-timer's modest spread sprang
+// straight back and read as "pinching does nothing". This reads the release on
+// INTENT, the way the menu strip reads a swipe: a pinch that never left its
+// starting band but moved a clear `intent` factor away from that band's resting
+// size is taken as a request for the next band in that direction. Anything that
+// already crossed a band during the gesture keeps exactly what it reached.
+//
+//   gesture   — apparent size at release (gestureH / gestureW)
+//   startBand — committed band when the pinch began
+//   committed — committed band at release
+//   heights   — gesture-space sizes, MOST detailed first
+export const PINCH_INTENT = 1.2;
+export function releaseBand({ gesture, startBand, committed, heights, intent = PINCH_INTENT }) {
+  const n = heights.length;
+  if (!n || committed !== startBand) return committed;
+  const rest = heights[committed];
+  if (gesture >= rest * intent && committed > 0) return committed - 1;
+  if (gesture <= rest / intent && committed < n - 1) return committed + 1;
+  return committed;
+}

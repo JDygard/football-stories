@@ -50,9 +50,6 @@
 import { memo } from "react";
 import {
   ERA_HEADER_H,
-  ERA_BLURB_FS,
-  ERA_BLURB_LH,
-  ERA_BLURB_BASELINE,
   ERA_LABEL_BASELINE,
   ERA_YEARS_BASELINE,
   ERA_RULE_Y,
@@ -257,31 +254,6 @@ const EraLayer = memo(function EraLayer({
                 </text>
               )}
 
-              {/* THE BLURB — only on the selected chapter, and only ever as
-                  many lines as the layout bought room for (buildEraBoxes wraps
-                  to the same measure Main reserved against). Haloed in the
-                  plaque's own tint, like the rest of the label: entry bands for
-                  personnel arriving in the era's first year land on the rows
-                  immediately below, and connectors cross this band. */}
-              {focused &&
-                b.blurbLines?.map((line, i) => (
-                  <text
-                    key={i}
-                    x={b.textX}
-                    y={b.y0 + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
-                    data-era-blurb={b.id}
-                    fontSize={ERA_BLURB_FS}
-                    textAnchor="start"
-                    fill="#1f2430"
-                    stroke={t.header}
-                    strokeWidth={2.5}
-                    strokeLinejoin="round"
-                    paintOrder="stroke"
-                    style={{ letterSpacing: 0.1 }}
-                  >
-                    {line}
-                  </text>
-                ))}
             </g>
           );
         })}

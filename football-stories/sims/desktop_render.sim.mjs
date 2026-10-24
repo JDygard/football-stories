@@ -25,7 +25,7 @@ import {
 import DesktopDraftModule from "../src/desktop/DesktopDraftModule.jsx";
 import {
   ERA_HEADER_H, ERA_TEXT_INSET, ERA_BORDER_W, ERA_RAIL_GAP,
-  ERA_RECORD_FS,
+  ERA_RECORD_FS, ERA_LABEL_FS, estimateTextWidth,
 } from "../src/desktop/desktopEraModel.js";
 import { CROWN_H } from "../src/desktop/desktopCrownModel.js";
 import { MEDAL_SB, MEDAL_DIV } from "../src/palette.js";
@@ -433,7 +433,28 @@ for (const band of DESKTOP_BANDS) {
     ok(records.length <= titles.length,
       `${band}: no record without a title (${records.length} records, ${titles.length} titles)`);
     ok(markup.includes(">160-160<"), `${band}: a tieless record reads W-L`);
-    ok(markup.includes(">30-34-2<"), `${band}: a record with ties reads W-L-T`);
+    // NOT the W-L-T case here. The only fixture era with ties is "founding",
+    // 4 seasons wide, and at the coarse bands that frame is ~95px against a
+    // 99px "Founding" — so it correctly carries no title and therefore no
+    // record. It passed before only because the fit test measured titles with
+    // the optimistic serif rate and let an oversized one through. Record
+    // FORMATTING is a model concern and is asserted once, below the band loop.
+    //
+    // What belongs here is the symptom itself: chapter titles bled INTO each
+    // other. Painted end of one against painted start of the next, measured the
+    // way the renderer positions things — no frame lookup needed, and it fails
+    // on exactly what a reader would see.
+    const painted = [...markup.matchAll(
+      /<text x="([\d.]+)"[^>]*data-era-title="[^"]*"[^>]*>([^<]+)</g,
+    )]
+      .map((mm) => ({ x: +mm[1], text: mm[2] }))
+      .sort((a, b) => a.x - b.x);
+    for (let i = 0; i + 1 < painted.length; i++) {
+      const end = painted[i].x + estimateTextWidth(painted[i].text, ERA_LABEL_FS, "serifWide");
+      ok(end <= painted[i + 1].x + 0.5,
+        `${band}: "${painted[i].text}" ends at ${Math.round(end)} but ` +
+        `"${painted[i + 1].text}" starts at ${Math.round(painted[i + 1].x)}`);
+    }
     // A record is EITHER inline with the title (right of it, same baseline) or
     // stacked on the standard gutter a line below. Never anywhere else.
     for (const r of records) {

@@ -38,7 +38,7 @@ import {
   trackSample,
   velocityOf,
 } from "../menu/menuModel.js";
-import { clamp, expSmooth, pickBand, visualScaleFor } from "./zoomMath.js";
+import { clamp, expSmooth, pickBand, releaseBand, visualScaleFor } from "./zoomMath.js";
 
 // TWO lists, and the difference matters. The phone ladder stops at ERA_SUMMARY
 // (DETAIL_BANDS' two coarse bands share zoom rung 1, so walking through both
@@ -194,7 +194,13 @@ export default function useTimelineViewport({
   const anchorYRef = useRef(0);
 
   const gestureHRef = useRef(bandHeights[initialBandIndex]);
-  const zoomTargetRef = useRef(bandHeights[initialBandIndex]);
+  // The settle target is a band INDEX, not a pixel value: it is resolved
+  // against the live bandHeights on every frame. Those can change under an
+  // in-flight settle (on the phone the hide-on-scroll header docking changes
+  // the viewport, and with it the menu rung and the floors stacked on it), and
+  // a pixel target captured beforehand then landed a band at a scale that was
+  // no longer 1 — a squished timeline nothing corrected until the next gesture.
+  const zoomTargetRef = useRef(initialBandIndex);
   const rafRef = useRef(0);
   const lastTRef = useRef(0);
   const targetBandRef = useRef(initialBandIndex);
@@ -202,6 +208,7 @@ export default function useTimelineViewport({
   const pinchActiveRef = useRef(false);
   const d0Ref = useRef(1); // two-finger distance at pinch start
   const pinchStartHRef = useRef(bandHeights[initialBandIndex]); // gestureH at pinch start
+  const pinchStartBandRef = useRef(initialBandIndex); // committed band at pinch start
   // Horizontal rail reveal refs.
   const railPanRef = useRef(0);
   const railRestRef = useRef(0);
@@ -413,7 +420,7 @@ export default function useTimelineViewport({
     (now) => {
       const dt = lastTRef.current ? now - lastTRef.current : 16;
       lastTRef.current = now;
-      const target = zoomTargetRef.current;
+      const target = bandHeightsRef.current[zoomTargetRef.current];
       let h = expSmooth(gestureHRef.current, target, dt, ANIM_TAU);
       const done = Math.abs(target - h) < ANIM_DONE_PX;
       if (done) h = target;
@@ -430,12 +437,8 @@ export default function useTimelineViewport({
   );
 
   const startAnim = useCallback(
-    (target, anchorY) => {
-      zoomTargetRef.current = clamp(
-        target,
-        bandHeightsRef.current[N - 1] * 0.6,
-        bandHeightsRef.current[0] * 1.6,
-      );
+    (targetBand, anchorY) => {
+      zoomTargetRef.current = clamp(targetBand, 0, N - 1);
       anchorYRef.current = anchorY;
       setScaleAnchorY(anchorY);
       if (!rafRef.current) {
@@ -469,7 +472,7 @@ export default function useTimelineViewport({
   useEffect(() => {
     if (!rafRef.current && !pinchActiveRef.current) {
       gestureHRef.current = bandHeights[bandIndexRef.current];
-      zoomTargetRef.current = gestureHRef.current;
+      zoomTargetRef.current = bandIndexRef.current;
       setVisualScale(1);
       setScaleAnchorY(0);
     }
@@ -498,7 +501,7 @@ export default function useTimelineViewport({
         wheelAccumRef.current -= steps * WHEEL_STEP;
         targetBandRef.current = clamp(targetBandRef.current + steps, 0, N - 1);
       }
-      startAnimRef.current(bandHeightsRef.current[targetBandRef.current], cursorY);
+      startAnimRef.current(targetBandRef.current, cursorY);
     };
 
     // Two-finger pinch zoom, driven by TOUCH events. On iOS, pointer events can
@@ -509,6 +512,41 @@ export default function useTimelineViewport({
     const dist2 = (t) =>
       Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
+    // A pinch that crosses a band re-renders the canvas, and the element each
+    // finger first landed on is usually part of what goes (a season block, a
+    // menu card). Touch events stay targeted at that node after it is detached,
+    // so they stop bubbling up to `el`: the touchend never arrived,
+    // pinchActiveRef stayed true, and the cosmetic scale froze mid-tween — the
+    // squished view after a zoom change, which lasted until some later
+    // one-finger scroll happened to deliver a touchend. Listening on the touch
+    // targets themselves keeps the tail of the gesture reachable; `seen` stops
+    // an event that does still bubble from being handled twice.
+    const seen = new WeakSet();
+    const firstSight = (e) => {
+      if (seen.has(e)) return false;
+      seen.add(e);
+      return true;
+    };
+    const fingerTargets = new Set();
+    const bindTargets = (touches) => {
+      for (const t of touches) {
+        const n = t.target;
+        if (!n || n === el || fingerTargets.has(n)) continue;
+        n.addEventListener("touchmove", onTouchMove, { passive: false });
+        n.addEventListener("touchend", onTouchEnd);
+        n.addEventListener("touchcancel", onTouchEnd);
+        fingerTargets.add(n);
+      }
+    };
+    const unbindTargets = () => {
+      for (const n of fingerTargets) {
+        n.removeEventListener("touchmove", onTouchMove);
+        n.removeEventListener("touchend", onTouchEnd);
+        n.removeEventListener("touchcancel", onTouchEnd);
+      }
+      fingerTargets.clear();
+    };
+
     const onTouchStart = (e) => {
       if (e.touches.length < 2) return;
       e.preventDefault();
@@ -518,13 +556,16 @@ export default function useTimelineViewport({
         lastTRef.current = 0;
       }
       pinchActiveRef.current = true;
+      bindTargets(e.touches);
       d0Ref.current = Math.max(1, dist2(e.touches));
       pinchStartHRef.current = gestureHRef.current;
+      pinchStartBandRef.current = bandIndexRef.current;
       const anchorY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - topOf();
       anchorYRef.current = anchorY;
       setScaleAnchorY(anchorY);
     };
     const onTouchMove = (e) => {
+      if (!firstSight(e)) return;
       if (e.touches.length < 2) return;
       e.preventDefault();
       if (!pinchActiveRef.current) return;
@@ -532,10 +573,18 @@ export default function useTimelineViewport({
       applyGestureHRef.current(pinchStartHRef.current * (d / d0Ref.current));
     };
     const onTouchEnd = (e) => {
+      if (!firstSight(e)) return;
       if (!pinchActiveRef.current) return;
       if (e.touches.length >= 2) return; // still pinching
       pinchActiveRef.current = false;
-      startAnimRef.current(bandHeightsRef.current[bandIndexRef.current], anchorYRef.current);
+      unbindTargets();
+      const target = releaseBand({
+        gesture: gestureHRef.current,
+        startBand: pinchStartBandRef.current,
+        committed: bandIndexRef.current,
+        heights: bandHeightsRef.current,
+      });
+      startAnimRef.current(target, anchorYRef.current);
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -549,6 +598,7 @@ export default function useTimelineViewport({
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
+      unbindTargets();
     };
   }, []);
 

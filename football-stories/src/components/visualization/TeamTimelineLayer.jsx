@@ -749,9 +749,10 @@ const TeamTimelineLayer = memo(function TeamTimelineLayer({
         railRight: railWidth ? railLeft + railWidth : null,
         // No frame to hang the gutter off — line the plaque up with the page.
         textLeft: eraFramed ? null : contentLeft,
-        selectedId: focusedEraId,
+        // No in-plaque blurb any more: the open chapter reads in ChapterCard.
+        selectedId: null,
       }),
-    [layout, width, railWidth, railLeft, eraFramed, contentLeft, focusedEraId],
+    [layout, width, railWidth, railLeft, eraFramed, contentLeft],
   );
   const visibleEras = useMemo(
     () => eraBoxes.filter((b) => b.y1 > scrollY - vPad && b.y0 < vBot),

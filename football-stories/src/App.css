@@ -96,6 +96,9 @@
 .zoom-hud {
   animation: zoomHudPop 1.5s ease both;
 }
+.zoom-hud-long {
+  animation-duration: 3s;
+}
 /* Reduced motion: keep the auto-fade (so it still disappears) but drop the
    translate. */
 @media (prefers-reduced-motion: reduce) {
@@ -120,6 +123,90 @@
 @media (prefers-reduced-motion: no-preference) {
   .menu-hint-y { animation: menuHintY 1.6s ease-in-out infinite; }
   .menu-hint-x { animation: menuHintX 1.6s ease-in-out infinite; }
+}
+
+/* Menu-zoom GESTURE COACH (MenuZoom.jsx). One 3.2s loop: the miniature grows
+   while the fingertips spread over it (portrait) or the wheel rolls up beside
+   it (landscape), holds, then resets while the fingers lift off. Reduced
+   motion skips the loop and holds the spread pose, which still reads as
+   "two fingers, apart". */
+.coach-zoom { transform-origin: 50% 50%; }
+.coach-finger {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.coach-finger-a { transform: translate(-70px, -38px); }
+.coach-finger-b { transform: translate(70px, 38px); }
+.coach-mouse {
+  width: 26px;
+  height: 40px;
+  border-radius: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(15, 32, 54, 0.6);
+  box-sizing: border-box;
+}
+.coach-arrow {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  line-height: 1;
+}
+.coach-wheel {
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  width: 4px;
+  height: 8px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #fff;
+}
+@keyframes coachZoom {
+  0%, 14% { transform: scale(0.84); }
+  58%, 80% { transform: scale(1.1); }
+  100% { transform: scale(0.84); }
+}
+@keyframes coachFingerA {
+  0% { transform: translate(-14px, -8px); opacity: 0; }
+  12% { transform: translate(-14px, -8px); opacity: 1; }
+  58% { transform: translate(-70px, -38px); opacity: 1; }
+  74% { transform: translate(-70px, -38px); opacity: 0; }
+  100% { transform: translate(-14px, -8px); opacity: 0; }
+}
+@keyframes coachFingerB {
+  0% { transform: translate(14px, 8px); opacity: 0; }
+  12% { transform: translate(14px, 8px); opacity: 1; }
+  58% { transform: translate(70px, 38px); opacity: 1; }
+  74% { transform: translate(70px, 38px); opacity: 0; }
+  100% { transform: translate(14px, 8px); opacity: 0; }
+}
+@keyframes coachWheel {
+  0%, 14% { transform: translateY(6px); opacity: 0.4; }
+  30% { transform: translateY(-2px); opacity: 1; }
+  31% { transform: translateY(6px); opacity: 0.4; }
+  47% { transform: translateY(-2px); opacity: 1; }
+  48% { transform: translateY(6px); opacity: 0.4; }
+  64% { transform: translateY(-2px); opacity: 1; }
+  100% { transform: translateY(6px); opacity: 0.4; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .coach-zoom { animation: coachZoom 3.2s ease-in-out infinite; }
+  .coach-finger-a { animation: coachFingerA 3.2s ease-in-out infinite; }
+  .coach-finger-b { animation: coachFingerB 3.2s ease-in-out infinite; }
+  .coach-arrow {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  line-height: 1;
+}
+.coach-wheel { animation: coachWheel 3.2s ease-in-out infinite; }
 }
 
 /* Tour callouts: they point at live chrome outside the pane, so they can't

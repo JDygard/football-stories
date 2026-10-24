@@ -31,9 +31,6 @@
 
 import { memo } from "react";
 import {
-  ERA_BLURB_FS,
-  ERA_BLURB_LH,
-  ERA_BLURB_BASELINE,
   ERA_HEADER_H,
   ERA_HEADER_COMPACT_H,
   ERA_COMPACT_YEARS_BASELINE,
@@ -384,29 +381,6 @@ const DesktopEraLayer = memo(function DesktopEraLayer({
                     </text>
                   )}
 
-                  {/* THE BLURB — only on the selected chapter. The wall label
-                      gains its paragraph when you pick it; every frame carrying
-                      prose at all times would turn the timeline into a page of
-                      text. Haloed like the rest of the plaque text because ribbon
-                      connectors drop through this band. */}
-                  {focused &&
-                    b.blurbLines?.map((line, i) => (
-                      <text
-                        key={i}
-                        x={b.blurbX}
-                        y={top + ERA_BLURB_BASELINE + i * ERA_BLURB_LH}
-                        data-era-blurb={b.id}
-                        fontSize={ERA_BLURB_FS}
-                        textAnchor="start"
-                        fill={ERA_INK}
-                        stroke={t.header}
-                        strokeWidth={2.5}
-                        paintOrder="stroke"
-                        style={{ letterSpacing: 0.1 }}
-                      >
-                        {line}
-                      </text>
-                    ))}
                   </>
                 )}
               </g>

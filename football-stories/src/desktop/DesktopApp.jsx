@@ -24,13 +24,14 @@
 // cost is a fixed slice of height, which the lane caps anyway (LANE_MAX in
 // DesktopTimelineLayer — it never stretches to fill the window).
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import './desktop.css'
 import '../App.css'
 import Header from '../components/header/Header.jsx'
 import DesktopMain from './DesktopMain.jsx'
 import RibbonControls from '../components/RibbonControls.jsx'
+import ChapterCard from '../components/ChapterCard.jsx'
 import LeagueView from '../components/LeagueView.jsx'
 import MethodologyView from '../components/MethodologyView.jsx'
 import AboutView from '../components/AboutView.jsx'
@@ -67,25 +68,31 @@ const SWEEP_IN_MS = 280
 // motion the user can't read: it would look meaningful and mean nothing.
 const PICK_SWEEP_DIR = 1
 
-function PanelHeading({ icon, label, badge = null }) {
+function DockTab({ icon, label, badge = null, active, onClick, onClose = null }) {
   return (
     <div
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
+        minWidth: 0,
         padding: '8px 14px 7px',
         fontSize: 12,
         fontWeight: 700,
         letterSpacing: 0.4,
-        color: '#3a3f47',
-        borderBottom: '1px solid #e8eaef',
-        background: '#f4f5f8',
-        flexShrink: 0,
+        color: active ? '#1f2430' : '#7a8190',
+        background: active ? '#fff' : 'transparent',
+        borderRight: '1px solid #e8eaef',
+        boxShadow: active ? 'inset 0 -2px 0 #2d6cdf' : 'none',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
       }}
     >
       <span style={{ fontSize: 14, lineHeight: 1 }}>{icon}</span>
-      {label}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 420 }}>{label}</span>
       {badge != null && (
         <span
           style={{
@@ -99,6 +106,26 @@ function PanelHeading({ icon, label, badge = null }) {
         >
           {badge}
         </span>
+      )}
+      {onClose && (
+        <button
+          aria-label="Close chapter"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
+          style={{
+            border: 'none',
+            background: 'none',
+            color: '#7a8190',
+            fontSize: 15,
+            lineHeight: 1,
+            padding: '0 2px',
+            cursor: 'pointer',
+          }}
+        >
+          ×
+        </button>
       )}
     </div>
   )
@@ -128,6 +155,9 @@ function DesktopApp() {
   // Which Named Era chapter is currently focused (clicked plaque). The zoom
   // itself lives in the viewport; this is only the selection.
   const [focusedEraId, setFocusedEraId] = useState(null);
+  // Which tab of the bottom dock is showing. Opening a chapter brings its tab
+  // forward; closing it (or the chapter going away) falls back to Personnel.
+  const [dockTab, setDockTab] = useState('personnel');
 
   // Career-follow sweep: { dir, phase }. dir is +1 (following someone onward —
   // the destination is below, so the view exits upward) or -1 (following them
@@ -190,6 +220,17 @@ function DesktopApp() {
     setFocusedEraId(null);
   }, []);
 
+  // The open chapter, for the dock's Chapter tab. Gone when the eras toggle
+  // is off or the team changes, and the dock falls back to Personnel with it.
+  const focusedEra = useMemo(
+    () =>
+      focusedEraId && settings.showEras !== false
+        ? (erasSegment?.eras || []).find((e) => e.id === focusedEraId) || null
+        : null,
+    [focusedEraId, erasSegment, settings.showEras],
+  );
+  const tab = focusedEra ? dockTab : 'personnel';
+
   const goTo = useCallback((team, year, follow = null, dir = 0) => {
     setLeagueOpen(false);
     setFocusYear(year ?? null);
@@ -234,6 +275,7 @@ function DesktopApp() {
   // the one inside it.
   const focusEra = useCallback((box) => {
     setFocusedEraId(box?.id ?? null);
+    setDockTab(box ? 'chapter' : 'personnel');
     if (!box) {
       // Nothing to restore: the reader's role toggles were overridden, never
       // altered, so clearing the override hands the rail straight back.
@@ -467,12 +509,46 @@ function DesktopApp() {
               minHeight: 0,
             }}
           >
-            <PanelHeading
-              icon="👥"
-              label="PERSONNEL TRACKS"
-              badge={(ribbonConfig.players || []).length || null}
-            />
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* TABS: Personnel Tracks always; the open chapter beside it. The
+                chapter's reading lives here rather than over the timeline,
+                where it covered the far end of the lane and the ribbons. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'stretch',
+                borderBottom: '1px solid #e8eaef',
+                background: '#f4f5f8',
+                flexShrink: 0,
+              }}
+            >
+              <DockTab
+                active={tab === 'personnel'}
+                onClick={() => setDockTab('personnel')}
+                icon="👥"
+                label="PERSONNEL TRACKS"
+                badge={(ribbonConfig.players || []).length || null}
+              />
+              {focusedEra && (
+                <DockTab
+                  active={tab === 'chapter'}
+                  onClick={() => setDockTab('chapter')}
+                  icon="⚑"
+                  label={`CHAPTER · ${focusedEra.label}`}
+                  onClose={() => focusEra(null)}
+                />
+              )}
+            </div>
+            {tab === 'chapter' && <ChapterCard docked era={focusedEra} />}
+            {/* Kept mounted while hidden so its search and filters survive a
+                trip to the chapter tab. */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: tab === 'personnel' ? 'flex' : 'none',
+                flexDirection: 'column',
+              }}
+            >
               <RibbonControls
                 teamId={selectedTeam}
                 draftSegment={draftSegment}

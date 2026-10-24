@@ -705,9 +705,10 @@ const DesktopTimelineLayer = memo(function DesktopTimelineLayer({
   const eraBoxes = useMemo(
     () =>
       eras?.length
-        ? buildEraBoxes({ eras, layout, selectedId: focusedEraId })
+        ? // No in-plaque blurb any more: the open chapter reads in ChapterCard.
+          buildEraBoxes({ eras, layout, selectedId: null })
         : [],
-    [eras, layout, focusedEraId],
+    [eras, layout],
   );
   const showEras = eraBoxes.length > 0;
   // …and whether the chapter gets its box, or only its wall label.

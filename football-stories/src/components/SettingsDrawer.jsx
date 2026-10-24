@@ -85,7 +85,18 @@ function Toggle({ on, onClick }) {
 // a phone slide, and a nested scroll container SWALLOWS THE SWIPE — the gesture
 // goes to the list (which may have nothing to scroll) and never reaches the
 // slide strip underneath. The rung sizes itself so every row fits instead.
-export default function SettingsDrawer({ settings = {}, onChange, desktop = false, scroll = true }) {
+//
+// `compact` drops each row's explanation to a hover title and tightens the
+// rows: the menu-zoom start page shows these as a secondary card under the
+// gesture coach, where four paragraphs of fine print would outweigh the one
+// thing the page exists to teach.
+export default function SettingsDrawer({
+  settings = {},
+  onChange,
+  desktop = false,
+  scroll = true,
+  compact = false,
+}) {
   const features = desktop ? FEATURES : FEATURES.filter((f) => !f.desktopOnly);
   // absent => the feature's default (most on; the adjusted-grade lens off).
   const isOn = (key, defaultOn = true) =>
@@ -99,7 +110,7 @@ export default function SettingsDrawer({ settings = {}, onChange, desktop = fals
         style={{
           overflowY: scroll ? "auto" : "visible",
           flex: scroll ? 1 : "0 0 auto",
-          padding: "6px 8px 10px",
+          padding: compact ? "4px 6px 6px" : "6px 8px 10px",
         }}
       >
         {features.map((f) => {
@@ -108,11 +119,12 @@ export default function SettingsDrawer({ settings = {}, onChange, desktop = fals
             <div
               key={f.key}
               onClick={() => toggle(f)}
+              title={compact ? f.hint : undefined}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 14,
-                padding: "11px 12px",
+                padding: compact ? "8px 10px" : "11px 12px",
                 borderRadius: 8,
                 cursor: "pointer",
               }}
@@ -121,7 +133,7 @@ export default function SettingsDrawer({ settings = {}, onChange, desktop = fals
             >
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, color: "#222" }}>{f.label}</div>
-                {f.hint && (
+                {f.hint && !compact && (
                   <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{f.hint}</div>
                 )}
               </div>

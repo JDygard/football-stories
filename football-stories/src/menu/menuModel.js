@@ -39,6 +39,10 @@ export const MENU_SLIDES = [
     // forced the display toggles into a scroll — and a start page that has to
     // be scrolled before it can be swiped is not a start page.
     title: "Every franchise, end to end.",
+    // One line under it, saying what the page is a start page FOR. Affordable
+    // again because the display toggles went compact (labels only), which gave
+    // back far more height than this takes.
+    lede: "Every season, draft class and coach on one timeline you zoom through.",
   },
   {
     id: "controls",
@@ -231,6 +235,9 @@ export const MENU_HINTS = {
     // The CTA.
     start: "Pinch out to start",
     startGlyph: "⤢",
+    // The gesture coach's caption: the CTA already teaches the way IN, so the
+    // coach teaches the way back, which is the half nobody guesses.
+    coach: "Pinch in any time to come back here",
     // The secondary offer, and the direction it lives in.
     tour: "Keep scrolling for a quick tour",
     tourShort: "Quick tour",
@@ -241,6 +248,7 @@ export const MENU_HINTS = {
     axis: "x",
     start: "Mouse wheel up to start",
     startGlyph: "↑",
+    coach: "Wheel down any time to come back here",
     tour: "Drag across for a quick tour",
     tourShort: "Quick tour",
     tourAction: "Drag or swipe across",

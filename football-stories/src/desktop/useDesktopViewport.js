@@ -57,7 +57,7 @@ import {
   velocityOf,
 } from "./flingModel.js";
 import { buildEraBoxes, blurbPadFor } from "./desktopEraModel.js";
-import { clamp, expSmooth, pickBand, visualScaleFor } from "../hooks/zoomMath.js";
+import { clamp, expSmooth, pickBand, releaseBand, visualScaleFor } from "../hooks/zoomMath.js";
 
 // DESKTOP_BANDS, not DETAIL_BANDS: the desktop ladder is exactly the four
 // user-facing rungs (Eras / Seasons / Season by season / Every game).
@@ -228,7 +228,13 @@ export default function useDesktopViewport({
   const anchorXRef = useRef(0);
 
   const gestureWRef = useRef(bandWidths[initialBandIndex]);
-  const zoomTargetRef = useRef(bandWidths[initialBandIndex]);
+  // The settle target is a band INDEX, not a pixel value: it is resolved
+  // against the live bandWidths on every frame. Those can change under an
+  // in-flight settle (on the phone the hide-on-scroll header docking changes
+  // the viewport, and with it the menu rung and the floors stacked on it), and
+  // a pixel target captured beforehand then landed a band at a scale that was
+  // no longer 1 — a squished timeline nothing corrected until the next gesture.
+  const zoomTargetRef = useRef(initialBandIndex);
   const rafRef = useRef(0);
   const lastTRef = useRef(0);
   const targetBandRef = useRef(initialBandIndex);
@@ -236,6 +242,7 @@ export default function useDesktopViewport({
   const pinchActiveRef = useRef(false);
   const d0Ref = useRef(1);
   const pinchStartWRef = useRef(bandWidths[initialBandIndex]);
+  const pinchStartBandRef = useRef(initialBandIndex); // committed band at pinch start
   // Scroll-event rAF throttle.
   const scrollRafRef = useRef(0);
 
@@ -477,7 +484,7 @@ export default function useDesktopViewport({
     (now) => {
       const dt = lastTRef.current ? now - lastTRef.current : 16;
       lastTRef.current = now;
-      const target = zoomTargetRef.current;
+      const target = bandWidthsRef.current[zoomTargetRef.current];
       let w = expSmooth(gestureWRef.current, target, dt, ANIM_TAU);
       const done = Math.abs(target - w) < ANIM_DONE_PX;
       if (done) w = target;
@@ -494,12 +501,8 @@ export default function useDesktopViewport({
   );
 
   const startAnim = useCallback(
-    (target, anchorX) => {
-      zoomTargetRef.current = clamp(
-        target,
-        bandWidthsRef.current[N - 1] * 0.6,
-        bandWidthsRef.current[0] * 1.6,
-      );
+    (targetBand, anchorX) => {
+      zoomTargetRef.current = clamp(targetBand, 0, N - 1);
       anchorXRef.current = anchorX;
       setScaleAnchorX(anchorX);
       if (!rafRef.current) {
@@ -524,7 +527,7 @@ export default function useDesktopViewport({
   useEffect(() => {
     if (!rafRef.current && !pinchActiveRef.current) {
       gestureWRef.current = bandWidths[bandIndexRef.current];
-      zoomTargetRef.current = gestureWRef.current;
+      zoomTargetRef.current = bandIndexRef.current;
     }
   }, [bandWidths, bandIndex]);
 
@@ -574,7 +577,7 @@ export default function useDesktopViewport({
         wheelAccumRef.current -= steps * WHEEL_STEP;
         targetBandRef.current = clamp(targetBandRef.current + steps, 0, N - 1);
       }
-      startAnimRef.current(bandWidthsRef.current[targetBandRef.current], cursorX);
+      startAnimRef.current(targetBandRef.current, cursorX);
     };
 
     // Two-finger pinch zoom via TOUCH events (touch-capable desktops); mirrors
@@ -582,6 +585,41 @@ export default function useDesktopViewport({
     // scrolls nor page-zooms during a pinch; one finger pans natively (pan-x).
     const dist2 = (t) =>
       Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+    // A pinch that crosses a band re-renders the canvas, and the element each
+    // finger first landed on is usually part of what goes (a season block, a
+    // menu card). Touch events stay targeted at that node after it is detached,
+    // so they stop bubbling up to `el`: the touchend never arrived,
+    // pinchActiveRef stayed true, and the cosmetic scale froze mid-tween — the
+    // squished view after a zoom change, which lasted until some later
+    // one-finger scroll happened to deliver a touchend. Listening on the touch
+    // targets themselves keeps the tail of the gesture reachable; `seen` stops
+    // an event that does still bubble from being handled twice.
+    const seen = new WeakSet();
+    const firstSight = (e) => {
+      if (seen.has(e)) return false;
+      seen.add(e);
+      return true;
+    };
+    const fingerTargets = new Set();
+    const bindTargets = (touches) => {
+      for (const t of touches) {
+        const n = t.target;
+        if (!n || n === el || fingerTargets.has(n)) continue;
+        n.addEventListener("touchmove", onTouchMove, { passive: false });
+        n.addEventListener("touchend", onTouchEnd);
+        n.addEventListener("touchcancel", onTouchEnd);
+        fingerTargets.add(n);
+      }
+    };
+    const unbindTargets = () => {
+      for (const n of fingerTargets) {
+        n.removeEventListener("touchmove", onTouchMove);
+        n.removeEventListener("touchend", onTouchEnd);
+        n.removeEventListener("touchcancel", onTouchEnd);
+      }
+      fingerTargets.clear();
+    };
 
     const onTouchStart = (e) => {
       if (e.touches.length < 2) return;
@@ -593,13 +631,16 @@ export default function useDesktopViewport({
         lastTRef.current = 0;
       }
       pinchActiveRef.current = true;
+      bindTargets(e.touches);
       d0Ref.current = Math.max(1, dist2(e.touches));
       pinchStartWRef.current = gestureWRef.current;
+      pinchStartBandRef.current = bandIndexRef.current;
       const anchorX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - leftOf();
       anchorXRef.current = anchorX;
       setScaleAnchorX(anchorX);
     };
     const onTouchMove = (e) => {
+      if (!firstSight(e)) return;
       if (e.touches.length < 2) return;
       e.preventDefault();
       if (!pinchActiveRef.current) return;
@@ -607,10 +648,18 @@ export default function useDesktopViewport({
       applyGestureWRef.current(pinchStartWRef.current * (d / d0Ref.current));
     };
     const onTouchEnd = (e) => {
+      if (!firstSight(e)) return;
       if (!pinchActiveRef.current) return;
       if (e.touches.length >= 2) return; // still pinching
       pinchActiveRef.current = false;
-      startAnimRef.current(bandWidthsRef.current[bandIndexRef.current], anchorXRef.current);
+      unbindTargets();
+      const target = releaseBand({
+        gesture: gestureWRef.current,
+        startBand: pinchStartBandRef.current,
+        committed: bandIndexRef.current,
+        heights: bandWidthsRef.current,
+      });
+      startAnimRef.current(target, anchorXRef.current);
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -624,6 +673,7 @@ export default function useDesktopViewport({
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
+      unbindTargets();
     };
   }, []);
 

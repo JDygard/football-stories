@@ -128,6 +128,9 @@ export const ERA_YEARS_TRACKING = 2;
 // the frame, which is what keeps a three-season chapter from going completely
 // wordless.
 const LABEL_PAD_R = 10;
+// How far a title may run past `inner` before it is dropped: exactly the right
+// pad, so it can crowd the frame's edge but never cross it. See CHAR_W.
+const LABEL_FIT_SLACK = LABEL_PAD_R;
 const YEARS_PAD_R = 4;
 
 // The chapter's border, and the CLEAR SPACE it keeps below the personnel
@@ -156,13 +159,27 @@ export const ERA_TONE_COUNT = 8;
 // from frames they comfortably fit in.
 // Two serif numbers on purpose, because the estimate is asked two different
 // questions and the safe answer differs:
-//   "serif"     — DOES IT FIT? Under-measure. A title dropped for being 2px too
-//                 wide costs a chapter its name; one that overhangs a couple of
-//                 px into the right pad costs nothing.
+//   "serif"     — a LOWER bound on the glyphs. Used for prose and for anything
+//                 where under-measuring is the cheap side of the error.
 //   "serifWide" — WHERE DOES IT END? Over-measure. Anything positioned AFTER
 //                 the title has to clear the real glyphs, and under-measuring
 //                 here printed the record straight through the tail of
 //                 "Grant's Twilight".
+//
+// THE FIT TEST USES "serifWide" (fixed 2026-08-30). It used to use "serif", on
+// the reasoning that "a title dropped for being 2px too wide costs a chapter
+// its name; one that overhangs a couple of px into the right pad costs
+// nothing." The instinct was right and the arithmetic was not: the gap between
+// the two rates is a flat 1.24x, so on a 200px frame the overhang is ~48px into
+// a 10px pad — straight through the border and into the next chapter's title.
+// Measured over all 359 authored eras, 60-67 labels per width band were being
+// painted outside their own frame.
+//
+// The original intent is kept, but bounded: a label may eat the right pad
+// (LABEL_PAD_R) and must never cross the frame edge. That is what
+// LABEL_FIT_SLACK is. It buys back most of what a strict test would drop — at a
+// 120px inner frame, 281 labels shown with none crossing, against 240 for a
+// strict test and 326-with-63-spilling for the old one.
 const CHAR_W = { serif: 0.5, serifWide: 0.62, sans: 0.55, bold: 0.58 };
 
 // …and per CHARACTER, relative to that base. Counting every glyph the same
@@ -311,10 +328,19 @@ export function buildEraBoxes({ eras, layout, selectedId = null }) {
     // nothing. The years are the more important of the two lines — they're
     // what makes the frame legible as a span — so they're allowed to survive
     // on their own in a narrow frame.
+    //
+    // Measured with the SAME rate that decides where the title ends, so the fit
+    // decision and every position derived from it can never disagree — see
+    // CHAR_W. A label may spend the right pad (LABEL_FIT_SLACK) and no more.
     const inner = width - ERA_TEXT_INSET - LABEL_PAD_R;
+    const fitW = inner + LABEL_FIT_SLACK;
     let labelText = null;
-    if (estimateTextWidth(era.label, ERA_LABEL_FS, "serif") <= inner) labelText = era.label;
-    else if (era.short && estimateTextWidth(era.short, ERA_LABEL_FS, "serif") <= inner) {
+    if (estimateTextWidth(era.label, ERA_LABEL_FS, "serifWide") <= fitW) {
+      labelText = era.label;
+    } else if (
+      era.short &&
+      estimateTextWidth(era.short, ERA_LABEL_FS, "serifWide") <= fitW
+    ) {
       labelText = era.short;
     }
     const yearsText = eraYearsLabel(era);

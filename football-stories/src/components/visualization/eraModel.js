@@ -187,6 +187,9 @@ export const ERA_EDGE_R = 6;
 
 // Right-hand breathing room before text reaches the far border.
 const LABEL_PAD_R = 12;
+// How far a title may run past `inner` before it is dropped: exactly the right
+// pad, so it can crowd the frame's edge but never cross it. See CHAR_W.
+const LABEL_FIT_SLACK = LABEL_PAD_R;
 
 // ---------------------------------------------------------------------------
 // Palette
@@ -231,10 +234,24 @@ export function eraTone(i) {
 // because counting every glyph the same made short chapter names like "Unitas"
 // measure wider than a frame they fit in comfortably. Rough classes are enough:
 // this only has to decide whether a string fits, not lay it out.
-const CHAR_W = { serif: 0.5, sans: 0.55, bold: 0.58 };
+// Two serif numbers, matching desktop/desktopEraModel.js:
+//   "serif"     — a LOWER bound on the glyphs, for prose and for anywhere
+//                 under-measuring is the cheap side of the error.
+//   "serifWide" — WHERE DOES IT END? Over-measure. The fit test uses this, so
+//                 a title is never accepted into a frame it will overflow; the
+//                 gap between the two rates is a flat 1.24x, which on a phone
+//                 frame is tens of px straight through the border.
+const CHAR_W = { serif: 0.5, serifWide: 0.62, sans: 0.55, bold: 0.58 };
 
 const charUnits = (ch) => {
-  if (" .,'’!:;|-–—".includes(ch)) return 0.32;
+  // An EM DASH is a full em and an en dash half of one. They were classed here
+  // with commas and periods at 0.32, so any line containing one measured ~0.7em
+  // short — harmless in a title (no era label has a dash) but not in a wrapped
+  // paragraph, and 95 of the 359 authored blurbs contain an em dash. Desktop
+  // fixed this 2026-08-16; this copy was missed.
+  if (ch === "—") return 1.5;
+  if (ch === "–") return 0.9;
+  if (" .,'’!:;|-".includes(ch)) return 0.32;
   if ("iljI".includes(ch)) return 0.36;
   if ("ftr".includes(ch)) return 0.44;
   if ("MW".includes(ch)) return 1.55;
@@ -353,9 +370,18 @@ export function buildEraBoxes({
     // Fit the title, then fall back to the authored short form, then to
     // nothing. The dates are the more important of the two lines — they're what
     // makes the frame legible as a span — so they're allowed to survive alone.
+    //
+    // Measured with the SAME rate that decides where the title ends, so the fit
+    // decision can never disagree with the positions derived from it. A label
+    // may spend the right pad (LABEL_FIT_SLACK) and never cross the frame.
+    const fitW = inner + LABEL_FIT_SLACK;
     let labelText = null;
-    if (estimateTextWidth(e.label, ERA_LABEL_FS, "serif") <= inner) labelText = e.label;
-    else if (e.short && estimateTextWidth(e.short, ERA_LABEL_FS, "serif") <= inner) {
+    if (estimateTextWidth(e.label, ERA_LABEL_FS, "serifWide") <= fitW) {
+      labelText = e.label;
+    } else if (
+      e.short &&
+      estimateTextWidth(e.short, ERA_LABEL_FS, "serifWide") <= fitW
+    ) {
       labelText = e.short;
     }
     const yearsText = eraYearsLabel(e);

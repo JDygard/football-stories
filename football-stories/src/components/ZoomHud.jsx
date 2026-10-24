@@ -10,6 +10,7 @@
 // animation that ends at opacity 0. Purely informational — no pointer events.
 
 import { useEffect, useRef } from "react";
+import { deepestZoomSeen, noteZoomSeen, wantsZoomNudge } from "../utils/zoomCoach.js";
 import { ZOOM_LEVELS, isMenuBand, zoomLabelFor } from "./visualization/detail.js";
 
 const FOOTER_BAR_H = 44; // keep in sync with Footer's BAR_H
@@ -52,6 +53,12 @@ export default function ZoomHud({ band }) {
   useEffect(() => {
     firstRef.current = false;
   }, []);
+  // Read BEFORE this level is recorded (the effect below runs after paint), so
+  // the first visit to a level still counts as unexplored.
+  const nudge = wantsZoomNudge(zoom, ZOOM_LEVELS, deepestZoomSeen());
+  useEffect(() => {
+    if (!isMenuBand(band)) noteZoomSeen(zoom);
+  }, [band, zoom]);
   if (firstRef.current) return null;
   // The menu rung is not a level of detail and captioning it would only put a
   // dark band across the start page's own gesture hint, which says the same
@@ -76,10 +83,11 @@ export default function ZoomHud({ band }) {
           the self-fading animation */}
       <div
         key={band}
-        className="zoom-hud"
+        // The nudge needs reading time, so a caption carrying one lingers.
+        className={nudge ? "zoom-hud zoom-hud-long" : "zoom-hud"}
         style={{
           width: "100%",
-          height: 74,
+          height: nudge ? 92 : 74,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "center",
@@ -104,6 +112,20 @@ export default function ZoomHud({ band }) {
           }}
         >
           {name}
+          {nudge && (
+            <span
+              style={{
+                display: "block",
+                marginTop: 2,
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: 0.2,
+                color: "rgba(255,255,255,0.8)",
+              }}
+            >
+              Pinch out again for more detail
+            </span>
+          )}
         </span>
       </div>
     </div>

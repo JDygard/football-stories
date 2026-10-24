@@ -23,6 +23,7 @@
 
 import SettingsDrawer from "../components/SettingsDrawer.jsx";
 import { MENU_SLIDES, MENU_SLIDE_COUNT, hintFor, slideIndexFor, slidePresence } from "./menuModel.js";
+import { eraTone } from "../components/visualization/eraModel.js";
 
 const NAVY = "#0f2036";
 const NAVY_SOFT = "#1b3454";
@@ -74,9 +75,6 @@ export default function MenuZoom({
   offset = 0,
   settings,
   onSettingsChange,
-  onOpenLeague,
-  onOpenMethodology,
-  onOpenAbout,
   onGoToSlide,
   // Leave the menu for the timeline — the page's call to action. It names the
   // platform's zoom gesture AND accepts a click, because a call to action that
@@ -139,9 +137,6 @@ export default function MenuZoom({
                   hint={hint}
                   settings={settings}
                   onSettingsChange={onSettingsChange}
-                  onOpenLeague={onOpenLeague}
-                  onOpenMethodology={onOpenMethodology}
-                  onOpenAbout={onOpenAbout}
                   onStart={onStart}
                   onTour={() => onGoToSlide && onGoToSlide(i + 1)}
                   desktop={!vertical}
@@ -182,95 +177,90 @@ function MenuSlide({
   hint,
   settings,
   onSettingsChange,
-  onOpenLeague,
-  onOpenMethodology,
-  onOpenAbout,
   onStart,
   onTour,
   desktop,
 }) {
+  // THE HERO IS THE LESSON. The app's one unusual idea is that zoom changes
+  // what you see rather than how big it is, and nobody guesses that from a
+  // button. So the navy panel carries a looping demonstration of the gesture
+  // over a miniature of the very thing it opens (GestureCoach), and the page
+  // around it is cut down to what a first visit needs: the CTA, the display
+  // toggles in their compact form, and the way to the tour. The "Elsewhere"
+  // links that used to sit here are all in the header's ☰ menu, which is where
+  // a returning reader looks for them anyway.
   const hero = (
     <header
       style={{
         background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_SOFT} 100%)`,
         color: "#fff",
-        padding: desktop ? "22px 26px" : "18px 20px",
+        padding: desktop ? "24px 28px" : "20px 20px 18px",
         borderRadius: desktop ? 14 : 0,
         display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        // In landscape the hero IS the flex item — there is no wrapper to do
-        // the shrinking for it. Without an explicit basis and `minWidth: 0` its
-        // hypothetical size is the headline's MAX-CONTENT, one long unbroken
-        // line, and the row hands it that width; the navy box then ends where
-        // the column does and the last word is cut off mid-letter.
-        flex: desktop ? "1 1 380px" : "0 0 auto",
-        minWidth: desktop ? 240 : undefined,
+        flexDirection: desktop ? "row" : "column",
+        alignItems: desktop ? "center" : "stretch",
+        gap: desktop ? 28 : 14,
+        // Portrait: the hero takes whatever the slide has left, so the coach
+        // gets the room and the cards below keep their natural height.
+        // Landscape: it is the wide flex item of the top row; `minWidth: 0`
+        // stops the headline's max-content width from sizing it.
+        flex: desktop ? "1 1 520px" : "1 1 auto",
+        minWidth: 0,
+        minHeight: 0,
         overflow: "hidden",
       }}
     >
-      {/* The title and nothing else. An eyebrow and a paragraph of blurb used
-          to sit here; the height they took is what forced the display toggles
-          into a scroll of their own, and a nested scroller on a phone swallows
-          the swipe that was supposed to reach the slide strip. */}
-      <h1
-        style={{
-          margin: 0,
-          fontSize: desktop ? 28 : 22,
-          lineHeight: 1.18,
-          fontWeight: 700,
-          letterSpacing: -0.3,
-        }}
-      >
-        {slide.title}
-      </h1>
+      <div style={{ flex: desktop ? "1 1 0" : "0 0 auto", minWidth: 0 }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: desktop ? 30 : 24,
+            lineHeight: 1.15,
+            fontWeight: 700,
+            letterSpacing: -0.3,
+          }}
+        >
+          {slide.title}
+        </h1>
+        {slide.lede && (
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontSize: desktop ? 15 : 13.5,
+              lineHeight: 1.45,
+              color: "rgba(255,255,255,0.74)",
+              maxWidth: 420,
+            }}
+          >
+            {slide.lede}
+          </p>
+        )}
+      </div>
+      <GestureCoach hint={hint} desktop={desktop} />
     </header>
   );
 
   const display = (
-    // STATIC, and headerless. Four self-describing toggles do not need a
-    // caption reading "Display", and the card must not be a scroll container:
-    // on a phone it covers most of the slide, and a nested scroller SWALLOWS
-    // THE SWIPE — the gesture went to this list and the strip never moved.
-    <Card static flex={desktop ? "1.15 1 420px" : undefined} flush={desktop}>
+    // STATIC, and never a scroll container: on a phone a nested scroller
+    // SWALLOWS THE SWIPE meant for the slide strip. Compact rows (labels only,
+    // the explanation on hover) keep all four toggles on screen with room to
+    // spare.
+    <Card title="Display" static width={desktop ? 280 : undefined} flush={desktop}>
       <SettingsDrawer
         desktop={desktop}
         scroll={false}
+        compact
         settings={settings}
         onChange={onSettingsChange}
       />
     </Card>
   );
 
-  const elsewhere = (
-    <Card title="Elsewhere" width={desktop ? 250 : undefined} flush={desktop}>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          padding: "10px 12px 12px",
-          alignItems: "flex-start",
-        }}
-      >
-        <LinkChip icon="🏆" label="League leaderboards" onClick={onOpenLeague} />
-        <LinkChip icon="ⓘ" label="How grades work" onClick={onOpenMethodology} />
-        <LinkChip icon="✎" label="About this project" onClick={onOpenAbout} />
-      </div>
-    </Card>
-  );
-
   // ---- LANDSCAPE: the window is the layout ----
   //
-  // This pane runs the full width of the display and the start page should read
-  // that way. An earlier cut centred everything in a 720px column, which on a
-  // 1440px window is a phone screenshot with two empty margins — and the app it
-  // introduces is the widest thing in the product.
-  //
-  // So: three columns across the top, the CTA spanning under them, and the tour
-  // invitation on its own rail at the RIGHT EDGE, which is where the tour
-  // actually is. The Display card gets full pane height as a side effect, so
-  // every toggle finally fits without a hidden scroll.
+  // The hero spans the row with the display card beside it, the CTA spans
+  // under both, and the tour invitation keeps its rail at the RIGHT EDGE,
+  // which is where the tour actually is.
   if (desktop) {
     return (
       <div style={{ height: "100%", display: "flex", boxSizing: "border-box" }}>
@@ -286,8 +276,8 @@ function MenuSlide({
         >
           <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, alignItems: "stretch" }}>
             {hero}
-            {display}
-            {elsewhere}
+            {/* Natural height: four compact rows do not need a pane-tall card. */}
+            <div style={{ flexShrink: 0, alignSelf: "flex-start" }}>{display}</div>
           </div>
           <StartCta hint={hint} onStart={onStart} />
         </div>
@@ -300,23 +290,135 @@ function MenuSlide({
   return (
     <Column desktop={false}>
       {hero}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "flex-start",
-          gap: 10,
-          marginTop: 10,
-        }}
-      >
-        {display}
-        {elsewhere}
+      <div style={{ flexShrink: 0, marginTop: 10 }}>{display}</div>
+      <div style={{ flexShrink: 0, padding: "0 12px" }}>
+        <StartCta hint={hint} onStart={onStart} />
       </div>
-      <StartCta hint={hint} onStart={onStart} />
       <TourInvite hint={hint} onTour={onTour} />
     </Column>
+  );
+}
+
+// THE GESTURE COACH: a miniature of the Eras view (four chapter plaques with
+// their season bars) that grows on a loop while two fingertips spread over it,
+// or, in landscape, while a mouse wheel rolls up beside it. It is the page's
+// demonstration of its own CTA, and it plays the moment the app opens, so the
+// first gesture a reader tries is the one that works. Pure CSS (App.css,
+// `.coach-*`); reduced motion holds it still at the spread position.
+const COACH_PLAQUES = [
+  { tone: 0, flex: 1.3, bars: [-6, 10, -14, 8, 12, -9] },
+  { tone: 1, flex: 0.9, bars: [14, 18, 9, -5] },
+  { tone: 2, flex: 1.6, bars: [-10, -14, 4, -8, 6, 10, -12, -6] },
+  { tone: 3, flex: 1, bars: [-12, 6, -8, 16, 10] },
+];
+
+function GestureCoach({ hint, desktop }) {
+  const w = desktop ? 360 : 290;
+  const h = desktop ? 180 : 148;
+  const barK = desktop ? 1.6 : 1.3;
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        flex: "0 0 auto",
+        alignSelf: "center",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 10,
+        margin: desktop ? 0 : "auto 0",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div
+          className="coach-zoom"
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            gap: 3,
+            padding: 5,
+            boxSizing: "border-box",
+            background: "#fbfcfe",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+          }}
+        >
+          {COACH_PLAQUES.map((p, i) => {
+            const tone = eraTone(p.tone);
+            return (
+              <div
+                key={i}
+                style={{
+                  flex: `${p.flex} 1 0`,
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  border: `1.5px solid ${tone.border}`,
+                  borderRadius: 5,
+                  background: tone.wash,
+                  overflow: "hidden",
+                }}
+              >
+                <div style={{ background: tone.header, padding: "5px 5px 4px" }}>
+                  <div style={{ width: "55%", height: 2.5, borderRadius: 2, background: tone.years, opacity: 0.6 }} />
+                  <div style={{ width: "80%", height: 5, borderRadius: 2, background: tone.label, marginTop: 4 }} />
+                </div>
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-evenly",
+                    padding: "0 3px",
+                  }}
+                >
+                  {p.bars.map((b, j) => (
+                    <span
+                      key={j}
+                      style={{
+                        width: 3,
+                        height: Math.abs(b) * barK,
+                        borderRadius: 1,
+                        background: b > 0 ? "#2f9e55" : "#d64545",
+                        // wins rise from the midline, losses hang below it
+                        transform: `translateY(${b > 0 ? -50 : 50}%)`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {!desktop && (
+          <>
+            <span className="coach-finger coach-finger-a" />
+            <span className="coach-finger coach-finger-b" />
+          </>
+        )}
+      </div>
+      {desktop && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+          <span className="coach-arrow">↑</span>
+          <div className="coach-mouse" style={{ position: "relative" }}>
+            <span className="coach-wheel" />
+          </div>
+        </div>
+      )}
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: "rgba(255,255,255,0.66)",
+          textAlign: "center",
+        }}
+      >
+        {hint.coach}
+      </div>
+    </div>
   );
 }
 
@@ -505,36 +607,6 @@ function Card({ title, grow = false, width, flex, flush = false, static: isStati
       )}
       <div style={{ flex: isStatic ? "0 0 auto" : 1, minHeight: 0 }}>{children}</div>
     </section>
-  );
-}
-
-function LinkChip({ icon, label, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        border: "1px solid #d9dee7",
-        borderRadius: 999,
-        background: "#fff",
-        color: "#33405a",
-        fontSize: 12.5,
-        fontWeight: 600,
-        padding: "7px 13px",
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = ACCENT;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "#d9dee7";
-      }}
-    >
-      <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
-      {label}
-    </button>
   );
 }
 

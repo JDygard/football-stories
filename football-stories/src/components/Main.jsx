@@ -20,7 +20,7 @@ import {
   maxStackHeight,
   positionGroup,
 } from "./visualization/staffRibbonModel.js";
-import { eraBlurbLayout } from "./visualization/eraModel.js";
+import ChapterCard from "./ChapterCard.jsx";
 
 const Main = forwardRef(function Main(
   {
@@ -165,18 +165,13 @@ const Main = forwardRef(function Main(
   // range needs slack for the worst case or the last rows can't be reached.
   const ribbonSlack = useMemo(() => maxStackHeight(spans), [spans]);
 
-  // The open chapter's plaque has to grow before the layout runs, so its
-  // paragraph is measured HERE — against screen width alone, which is the one
-  // thing both this and the renderer can agree on (see eraBlurbMeasure). The
-  // result is a stable map so a layout rebuild only happens when the selection
-  // or the width genuinely changes.
-  const eraHeaderExtra = useMemo(() => {
-    if (!focusedEraId || !eras?.length || !width) return null;
-    const era = eras.find((e) => e.id === focusedEraId);
-    if (!era?.blurb) return null;
-    const { extraH } = eraBlurbLayout(era.blurb, width);
-    return extraH ? { [focusedEraId]: extraH } : null;
-  }, [focusedEraId, eras, width]);
+  // The open chapter reads in a ChapterCard over the timeline rather than
+  // growing its plaque to print the paragraph, so the layout no longer reserves
+  // blurb rows (eraHeaderExtra stays null).
+  const focusedEra = useMemo(
+    () => (focusedEraId && eras?.length ? eras.find((e) => e.id === focusedEraId) || null : null),
+    [focusedEraId, eras],
+  );
 
   const viewport = useTimelineViewport({
     seasons: mapped?.seasons,
@@ -189,7 +184,6 @@ const Main = forwardRef(function Main(
     onFocusConsumed,
     showPlayoffs,
     eras,
-    eraHeaderExtra,
   });
   const {
     layout, scrollY, band, handlers, didDrag, visualScale, scaleAnchorY,
@@ -332,6 +326,9 @@ const Main = forwardRef(function Main(
           )}
         </div>
       </div>
+      {!menu && focusedEra && (
+        <ChapterCard era={focusedEra} onClose={() => onFocusEra && onFocusEra(null)} />
+      )}
       <InfoCard selection={selected} adminById={adminById} onClose={closeCard} adjusted={adjustedGrades} />
       <ZoomHud band={band} />
     </div>

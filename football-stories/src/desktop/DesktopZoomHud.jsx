@@ -7,6 +7,7 @@
 // duplicate coarse band), so LevelBars maps one bar per rung with none doubled.
 
 import { useEffect, useRef } from "react";
+import { deepestZoomSeen, noteZoomSeen, wantsZoomNudge } from "../utils/zoomCoach.js";
 import { ZOOM_LEVELS, isMenuBand, zoomLabelFor } from "./desktopDetail.js";
 
 function LevelBars({ zoom }) {
@@ -43,6 +44,12 @@ export default function DesktopZoomHud({ band }) {
   useEffect(() => {
     firstRef.current = false;
   }, []);
+  // Read BEFORE this level is recorded (the effect below runs after paint), so
+  // the first visit to a level still counts as unexplored.
+  const nudge = wantsZoomNudge(zoom, ZOOM_LEVELS, deepestZoomSeen());
+  useEffect(() => {
+    if (!isMenuBand(band)) noteZoomSeen(zoom);
+  }, [band, zoom]);
   if (firstRef.current) return null;
   // The menu rung is not a level of detail — see the mobile HUD.
   if (isMenuBand(band)) return null;
@@ -63,10 +70,11 @@ export default function DesktopZoomHud({ band }) {
     >
       <div
         key={band}
-        className="zoom-hud"
+        // The nudge needs reading time, so a caption carrying one lingers.
+        className={nudge ? "zoom-hud zoom-hud-long" : "zoom-hud"}
         style={{
           width: "100%",
-          height: 74,
+          height: nudge ? 92 : 74,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "center",
@@ -89,6 +97,20 @@ export default function DesktopZoomHud({ band }) {
           }}
         >
           {name}
+          {nudge && (
+            <span
+              style={{
+                display: "block",
+                marginTop: 2,
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: 0.2,
+                color: "rgba(255,255,255,0.8)",
+              }}
+            >
+              Wheel up again for more detail
+            </span>
+          )}
         </span>
       </div>
     </div>

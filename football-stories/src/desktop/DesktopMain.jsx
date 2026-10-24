@@ -176,16 +176,9 @@ const DesktopMain = forwardRef(function DesktopMain(
   // ribbon entry connectors (staff + players) so they occupy layout space.
   const reserveByYear = useMemo(() => stripReserveByYear(spans), [spans]);
 
-  // The chapter the viewport needs to know about, so it can reserve whitespace
-  // for a blurb that won't fit. Only the selected one ever does.
-  const selectedEra = useMemo(() => {
-    if (!focusedEraId) return null;
-    const era = (eras || []).find((e) => e.id === focusedEraId);
-    if (!era?.blurb) return null;
-    const years = (mapped?.seasons || []).map((x) => x.year);
-    const last = era.end == null ? Math.max(...years) : era.end;
-    return { id: era.id, era, blurb: era.blurb, lastYear: last };
-  }, [focusedEraId, eras, mapped]);
+  // The open chapter reads in the dock's Chapter tab (DesktopApp), so the
+  // viewport no longer reserves whitespace for an in-plaque blurb: its
+  // `selectedEra` input is simply left unset.
 
   const viewport = useDesktopViewport({
     seasons: mapped?.seasons,
@@ -196,7 +189,6 @@ const DesktopMain = forwardRef(function DesktopMain(
     focusYear,
     onFocusConsumed,
     showPlayoffs,
-    selectedEra,
   });
   const {
     layout, scrollX, band, handlers, didDrag, visualScale, scaleAnchorX,
